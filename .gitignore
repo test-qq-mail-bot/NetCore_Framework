@@ -15,14 +15,17 @@ dist/
 config/
 data/
 tools/
-plugins/cmdb
-plugins/netconfig_guardian
-plugins/ops_toolbox
 .workbuddy/
 *.db
 *.sqlite
 *.sqlite3
 *.log
+
+# ===== plugins 白名单：只上传基础文件与 wiki_docs 示例插件，其余全部忽略 =====
+plugins/*
+!plugins/__init__.py
+!plugins/base_plugin.py
+!plugins/wiki_docs/
 
 # ===== 虚拟环境 =====
 .venv/
