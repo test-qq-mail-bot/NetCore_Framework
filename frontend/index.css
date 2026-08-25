@@ -1,0 +1,272 @@
+/* =====================================================================
+ * NetCore Framework - 统一设计系统（UI 框架规范）
+ * 详见 wiki/UI框架规范.md
+ * 主题：浅色（light）。所有颜色使用 CSS 变量，便于插件或主题覆盖。
+ * ===================================================================== */
+:root {
+    /* ===== 主色 ===== */
+    --nc-primary: #2d8cf0;
+    --nc-primary-dark: #1c6fd6;
+    --nc-primary-light: #5cadff;
+    --nc-success: #19be6b;
+    --nc-warning: #ff9900;
+    --nc-danger: #ed4014;
+    --nc-info: #909399;
+
+    /* ===== 中性色 ===== */
+    --nc-bg: #f5f7fa;
+    --nc-surface: #ffffff;
+    --nc-surface-2: #fafbfc;
+    --nc-border: #e4e7ed;
+    --nc-border-light: #ebeef5;
+    --nc-text: #303133;
+    --nc-text-secondary: #606266;
+    --nc-text-placeholder: #c0c4cc;
+    --nc-text-disabled: #c0c4cc;
+
+    /* ===== 侧边栏（深色） ===== */
+    --nc-aside-bg: #1f2d3d;
+    --nc-aside-bg-hover: #2a3a4d;
+    --nc-aside-bg-active: #2d8cf0;
+    --nc-aside-text: #c0ccda;
+    --nc-aside-text-active: #ffffff;
+    --nc-aside-logo-bg: #161e2a;
+
+    /* ===== 圆角 / 阴影 / 间距 / 字阶 ===== */
+    --nc-radius-sm: 6px;
+    --nc-radius: 8px;
+    --nc-radius-lg: 12px;
+    --nc-shadow-sm: 0 1px 4px rgba(0, 0, 0, .05);
+    --nc-shadow: 0 2px 12px rgba(0, 0, 0, .08);
+    --nc-shadow-md: 0 4px 16px rgba(0, 0, 0, .10);
+    --nc-gap-sm: 12px;
+    --nc-gap: 16px;
+    --nc-gap-lg: 24px;
+    --nc-fs-xs: 12px;
+    --nc-fs-sm: 13px;
+    --nc-fs-base: 14px;
+    --nc-fs-lg: 16px;
+    --nc-fs-xl: 18px;
+    --nc-fs-2xl: 22px;
+    --nc-header-h: 56px;
+
+    /* ===== Element Plus 主题变量覆盖（统一主色与中性色） ===== */
+    --el-color-primary: #2d8cf0;
+    --el-color-primary-light-3: #5cadff;
+    --el-color-primary-light-5: #8fd0ff;
+    --el-color-primary-light-7: #b8e2ff;
+    --el-color-primary-light-8: #d1ecff;
+    --el-color-primary-light-9: #e8f4ff;
+    --el-color-primary-dark-2: #1c6fd6;
+    --el-color-success: #19be6b;
+    --el-color-warning: #ff9900;
+    --el-color-danger: #ed4014;
+    --el-color-error: #ed4014;
+    --el-color-info: #909399;
+    --el-border-radius-base: 8px;
+    --el-border-radius-small: 6px;
+    --el-border-radius-round: 20px;
+    --el-font-size-base: 14px;
+    --el-text-color-primary: #303133;
+    --el-text-color-regular: #606266;
+    --el-text-color-secondary: #909399;
+    --el-text-color-placeholder: #c0c4cc;
+    --el-border-color: #e4e7ed;
+    --el-border-color-light: #ebeef5;
+    --el-border-color-lighter: #f0f2f5;
+    --el-bg-color: #ffffff;
+    --el-bg-color-overlay: #ffffff;
+    --el-bg-color-page: #f5f7fa;
+    --el-fill-color-blank: #ffffff;
+    --el-fill-color-light: #f5f7fa;
+    --el-fill-color: #f0f2f5;
+    --el-fill-color-lighter: #fafbfc;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; padding: 0; }
+
+body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+    background: var(--nc-bg);
+    color: var(--nc-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ===================== 布局 ===================== */
+.nc-layout { display: flex; height: 100%; min-height: 0; }
+
+.nc-aside {
+    width: 220px; min-width: 64px; max-width: 420px;
+    background: var(--nc-aside-bg); color: var(--nc-aside-text);
+    transition: width .15s ease;
+    /* 滚动移交给内部 .nc-aside-menus，外层不滚动、不裁剪，
+       保证拖拽手柄在子菜单展开产生滚动时依然全高可命中（修复：展开子菜单后无法拖宽） */
+    overflow: visible;
+    flex-shrink: 0; display: flex; flex-direction: column;
+    position: relative; user-select: none;
+}
+.nc-aside-menus { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.nc-aside.collapsed { width: 64px !important; }
+.nc-aside.collapsed .nc-logo-text,
+.nc-aside.collapsed .nc-menu-label,
+.nc-aside.collapsed .nc-sub-label,
+.nc-aside.collapsed .nc-resize-handle { display: none; }
+
+.nc-resize-handle {
+    /* 手柄放在不滚动的 .nc-aside 外层，全高固定；宽度 8px 全部落在侧栏内部，
+       避免被 overflow 裁剪，任何展开状态都可拖动 */
+    position: absolute; top: 0; right: 0; bottom: 0; width: 8px;
+    cursor: col-resize; z-index: 100; border-right: 2px solid transparent;
+    transition: border-color .15s;
+}
+.nc-resize-handle:hover, .nc-resize-handle.dragging { border-right-color: var(--nc-primary); }
+
+/* ===================== 菜单 ===================== */
+.nc-menu-item {
+    margin: 2px 8px; padding: 10px 12px; cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; white-space: nowrap;
+    overflow: hidden; gap: 10px; color: var(--nc-aside-text);
+    border-radius: var(--nc-radius-sm);
+    border-left: 3px solid transparent; transition: background .15s, color .15s;
+}
+.nc-menu-item:hover { background: var(--nc-aside-bg-hover); color: #fff; }
+.nc-menu-item.active {
+    background: linear-gradient(90deg, var(--nc-primary), var(--nc-primary-dark));
+    color: #fff; border-left-color: #fff;
+}
+.nc-menu-icon { width: 24px; height: 24px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,.08); border-radius: 6px; }
+.nc-menu-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nc-menu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.nc-chevron { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; transition: transform .2s ease; }
+.nc-chevron svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nc-chevron.open { transform: rotate(90deg); }
+.nc-sub-depth-1 { padding-left: 30px !important; }
+.nc-sub-depth-2 { padding-left: 46px !important; }
+.nc-sub-depth-3 { padding-left: 62px !important; }
+.nc-aside.collapsed .nc-menu-item { justify-content: center; padding: 11px 0; gap: 0; }
+.nc-aside.collapsed .nc-chevron { display: none; }
+.nc-aside.collapsed .nc-sub-depth-1,
+.nc-aside.collapsed .nc-sub-depth-2,
+.nc-aside.collapsed .nc-sub-depth-3 { padding-left: 0 !important; }
+
+/* ===================== 主区 / 头部 ===================== */
+.nc-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.nc-header {
+    height: var(--nc-header-h); background: var(--nc-surface);
+    border-bottom: 1px solid var(--nc-border);
+    display: flex; align-items: center; padding: 0 16px; flex-shrink: 0; min-width: 0;
+    box-shadow: var(--nc-shadow);
+}
+.nc-content { flex: 1; overflow-y: auto; padding: var(--nc-gap); min-width: 0; }
+.nc-toggle { cursor: pointer; margin-right: 12px; flex-shrink: 0; display: inline-flex; align-items: center; }
+.nc-toggle svg { width: 22px; height: 22px; fill: none; stroke: var(--nc-text); stroke-width: 2; stroke-linecap: round; }
+.nc-back { margin-right: 12px; }
+
+/* Logo / 底部版本 */
+.nc-logo {
+    height: var(--nc-header-h); display: flex; align-items: center; gap: 8px;
+    color: #fff; font-weight: bold; font-size: 15px; background: var(--nc-aside-logo-bg);
+    flex-shrink: 0; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nc-logo-icon { width: 22px; height: 22px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+.nc-logo-icon svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nc-aside-footer {
+    margin-top: auto; padding: 10px 14px; font-size: 12px; color: #8a99a8;
+    border-top: 1px solid var(--nc-aside-bg-hover); flex-shrink: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nc-aside.collapsed .nc-aside-footer { display: none; }
+
+/* ===================== 卡片 / 通用 ===================== */
+.nc-card {
+    background: var(--nc-surface); border-radius: var(--nc-radius);
+    padding: 18px; margin-bottom: var(--nc-gap); box-shadow: var(--nc-shadow);
+    border: 1px solid var(--nc-border-light);
+}
+.nc-card > h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--nc-text); }
+.nc-card > h3:not(:first-child) { margin-top: 18px; }
+
+.nc-page-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+.nc-muted { color: var(--nc-text-secondary); font-size: 13px; }
+
+.nc-error-card { padding: 24px; }
+.nc-error-card .el-alert { margin-bottom: 0; }
+
+/* ===================== 登录 ===================== */
+.nc-login-wrap {
+    height: 100%; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #2d8cf0 0%, #1c6fd6 100%);
+}
+.nc-login-box {
+    width: 380px; background: var(--nc-surface); border-radius: var(--nc-radius-lg);
+    padding: 36px 32px; max-width: 92vw; box-shadow: var(--nc-shadow-md);
+    border: 1px solid var(--nc-border-light);
+}
+.nc-tip { color: var(--nc-warning); font-size: 13px; margin-top: 8px; }
+
+/* ===================== 响应式（移动端覆盖层） ===================== */
+@media (max-width: 768px) {
+    .nc-aside { position: fixed; z-index: 1000; height: 100%; top: 0; left: 0; }
+    .nc-aside:not(.mobile-open) { transform: translateX(-100%); width: 220px !important; }
+}
+/* ===== 登录页增强（T03） ===== */
+.nc-login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.nc-login-logo {
+    width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+    background: linear-gradient(135deg, #2d8cf0, #1c6fd6);
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.nc-login-logo svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nc-login-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--nc-text); }
+.nc-login-sub { margin: 2px 0 0; font-size: 12px; color: var(--nc-text-secondary); }
+.nc-il-ico { width: 16px; height: 16px; fill: none; stroke: var(--nc-text-placeholder); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ===== 头部栏增强（T05） ===== */
+.nc-header-title { font-weight: 600; font-size: 16px; color: var(--nc-text); }
+.nc-header-spacer { flex: 1; }
+.nc-header-time { display: inline-flex; align-items: center; gap: 6px; margin-right: 18px; color: var(--nc-text-secondary); font-size: 13px; font-family: monospace; }
+.nc-h-ico { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nc-header-user { display: inline-flex; align-items: center; gap: 8px; margin-right: 14px; }
+.nc-avatar { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, var(--nc-primary), var(--nc-primary-dark)); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.nc-avatar svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nc-username { font-size: 14px; color: var(--nc-text); }
+
+/* ===== 布局容器通用骨架（T06，供各页面重写复用） ===== */
+.nc-section { margin-bottom: var(--nc-gap-lg); }
+.nc-section-title { font-size: var(--nc-fs-lg); font-weight: 600; color: var(--nc-text); margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+.nc-section-title::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: var(--nc-primary); }
+.nc-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: var(--nc-gap); }
+.nc-toolbar .spacer { flex: 1; }
+.nc-stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--nc-gap); margin-bottom: var(--nc-gap-lg); }
+.nc-stat-card { background: var(--nc-surface); border-radius: var(--nc-radius); padding: 18px 20px; box-shadow: var(--nc-shadow-sm); border: 1px solid var(--nc-border-light); position: relative; overflow: hidden; }
+.nc-stat-card .nc-stat-label { font-size: var(--nc-fs-sm); color: var(--nc-text-secondary); margin-bottom: 8px; }
+.nc-stat-card .nc-stat-value { font-size: 28px; font-weight: 700; color: var(--nc-text); line-height: 1.1; }
+.nc-stat-card .nc-stat-desc { font-size: var(--nc-fs-xs); color: var(--nc-text-placeholder); margin-top: 6px; }
+.nc-stat-card.accent-primary { border-top: 3px solid var(--nc-primary); }
+.nc-stat-card.accent-success { border-top: 3px solid var(--nc-success); }
+.nc-stat-card.accent-warning { border-top: 3px solid var(--nc-warning); }
+.nc-stat-card.accent-danger { border-top: 3px solid var(--nc-danger); }
+.nc-table-card { background: var(--nc-surface); border-radius: var(--nc-radius); box-shadow: var(--nc-shadow-sm); border: 1px solid var(--nc-border-light); padding: 16px; margin-bottom: var(--nc-gap); }
+.nc-form-card { background: var(--nc-surface); border-radius: var(--nc-radius); box-shadow: var(--nc-shadow-sm); border: 1px solid var(--nc-border-light); padding: 20px; margin-bottom: var(--nc-gap); }
+.nc-form-hint { font-size: var(--nc-fs-xs); color: var(--nc-text-secondary); margin-top: 4px; line-height: 1.5; }
+.nc-form-hint b { color: var(--nc-text); font-weight: 600; }
+.nc-empty { text-align: center; color: var(--nc-text-placeholder); padding: 40px 0; }
+
+body.nc-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+/* ===== 全局斑马纹（方案A：所有表单统一增强可读性） ===== */
+.el-table__body tr:nth-child(even) > td.el-table__cell {
+    background-color: var(--nc-zebra, #f6f8fb);
+}
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+    background: var(--nc-zebra, #f6f8fb);
+}
+/* 悬停态仍需高亮（EP 自带 hover 行背景，避免被斑马纹覆盖） */
+.el-table__body tr:hover > td.el-table__cell {
+    background-color: var(--el-table-row-hover-bg-color, #f5f7fa) !important;
+}
+@media (prefers-color-scheme: dark) {
+    :root { --nc-zebra: rgba(255,255,255,0.03); }
+}

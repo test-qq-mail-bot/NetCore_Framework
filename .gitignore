@@ -1,0 +1,54 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+
+# ===== 运行时（不进仓库）=====
+config/
+data/
+tools/
+plugins/cmdb
+plugins/netconfig_guardian
+plugins/ops_toolbox
+.workbuddy/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+env/
+
+# ===== 密钥 / 证书 =====
+.env
+*.key
+*.crt
+*.pem
+
+# ===== 编辑器 / OS =====
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# ===== 构建产物（补充）=====
+*.spec
+build_generated*
+
+# ===== 测试 / 覆盖率（补充）=====
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/

@@ -1,0 +1,30 @@
+# NetCore Framework 运行时依赖清单（全部精确锁定，禁止任何版本范围约束）
+# 技术栈：Python 3.10+ / FastAPI / Uvicorn / PyYAML / Pydantic / cryptography
+# 完整可复现依赖树见 requirements.lock.txt（pip freeze 全量锁定）
+fastapi==0.141.1
+uvicorn==0.52.1
+# WebSocket 支持（SSH 网页终端 WS 桥接）
+websockets==17.0.1
+pyyaml==6.0.3
+pydantic==2.13.4
+cryptography==50.0.0
+pyotp==2.10.0
+qrcode==8.2
+httpx==0.28.1
+jinja2==3.1.6
+apscheduler==3.11.3
+openpyxl==3.1.5
+pyinstaller==6.22.0
+# 运维常用工具箱插件依赖
+paramiko==4.0.0
+pyftpdlib==2.2.0
+dnspython==2.8.0
+tftpy==0.8.7
+# 文件上传（FTP/SFTP 客户端上传链路：Form / UploadFile / File）
+python-multipart==0.0.32
+# 二维码识别（PNG/JPG/WEBP/SVG 多格式解码）
+pillow==12.3.0
+opencv-python-headless==5.0.0.93
+numpy==2.5.2
+# 数通配置卫士插件依赖（已纳入主依赖，确保单文件打包包含）
+netmiko==4.7.0

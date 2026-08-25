@@ -1,0 +1,103 @@
+name: Build Binaries
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: '勾选后同时发布 Release（版本号取自 core/config_loader.py 的 SYSTEM_VERSION）'
+        type: boolean
+        required: false
+        default: false
+
+# 允许行动创建 Release
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build
+        run: python build.py --target win
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netcore-framework-windows
+          path: dist/netcore-framework.exe
+
+  linux:
+    name: Build Linux binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build
+        run: python build.py --target linux
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netcore-framework-linux
+          path: dist/netcore-framework
+
+  release:
+    name: Publish Release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    # 仅手动触发且勾选 publish_release 时发布；普通 push 只构建上传 artifact
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read framework version
+        id: ver
+        run: echo "version=$(grep -oP 'SYSTEM_VERSION\s*=\s*"\K[^"]+' core/config_loader.py | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: NetCore-Framework ${{ steps.ver.outputs.version }}
+          body: |
+            NetCore Framework ${{ steps.ver.outputs.version }}
+
+            附件：
+            - `netcore-framework.exe` — Windows 单文件版
+            - `netcore-framework` — Linux 单文件版
+          files: |
+            artifacts/netcore-framework-windows/netcore-framework.exe
+            artifacts/netcore-framework-linux/netcore-framework
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
