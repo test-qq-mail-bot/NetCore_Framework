@@ -21,6 +21,8 @@ jobs:
     name: Build Windows EXE
     runs-on: windows-latest
     timeout-minutes: 180
+    env:
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +48,8 @@ jobs:
     name: Build Linux binary
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
 

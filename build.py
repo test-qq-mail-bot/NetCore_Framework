@@ -38,6 +38,15 @@ import sys
 # ---- 项目根目录：build.py 所在目录（跨平台、不依赖写死路径） -----------------
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
+# ---- 强制标准输出使用 UTF-8 ------------------------------------------------------
+# 英文版 Windows（如 GitHub Actions runner）控制台默认 cp1252，
+# 直接 print 中文会抛 UnicodeEncodeError 导致构建秒退。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
 # ---- 隐藏导入：与 build.spec 对齐 -------------------------------------------------
 # 需要递归收集子模块的包（缺失会被跳过并告警）
 COLLECT_PKGS = ["core", "plugins", "uvicorn", "apscheduler", "jinja2", "netmiko",
