@@ -41,10 +41,9 @@ template: `
           <nc-table :data="merged" :columns="cols">
             <template #col-type="{row}"><el-tag :type="row.type==='whitelist'?'success':'danger'">{{row.type==='whitelist'?'白名单':'黑名单'}}</el-tag></template>
             <template #col-time="{row}">
-                <!-- 口径统一：本列只显示「永久」或换算后的具体时间；
-                     封禁状态/剩余时长等语义由「状态」列标签承担 -->
-                <span v-if="row.type==='blacklist'">{{ row.time_raw ? row.block_until_cn : '永久' }}</span>
-                <span v-else>{{ row.expires }}</span>
+                <!-- 口径：本列只有「空值」和「日期时间」两种形态——
+                     空=永久（显示空白）；有值=该时间到点后自动解封（按系统时区换算） -->
+                <span>{{ row.time_raw ? row.block_until_cn : '' }}</span>
             </template>
             <template #col-status="{row}">
                 <el-tag v-if="row.type==='blacklist'" :type="row.ban_state==='active'?'danger':(row.ban_state==='expired'?'info':'warning')">
@@ -100,19 +99,17 @@ template: `
     },
     methods: {
         fmtBlockUntil(iso) {
-            if (!iso) return '永久';
-            // 统一走 NC.fmtTime（按 user_config.yaml 时区换算、去 T/Z/毫秒）。
-            // 修复：此前用 new Date + 本地 getter 按**浏览器**时区显示，
-            // 与全站「配置时区」口径不一致。
+            // 空=永久：本列以**空白**呈现（口径见模板注释），不产出「永久」等文案；
+            // 非空走 NC.fmtTime 按配置时区换算、去 T/Z/毫秒
+            if (!iso) return '';
             if (window.NC && window.NC.fmtTime) return window.NC.fmtTime(iso);
             const d = new Date(iso);
             if (isNaN(d.getTime())) return iso;
             const p = n => (n < 10 ? '0' : '') + n;
             return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
         },
-        // 封禁/解封时间列表头筛选项显示格式化（time_raw 空=永久）
+        // 封禁/解封时间列表头筛选标签：空值由框架层渲染为"(空)"，此处仅处理非空时间
         fmtTimeRaw(v) {
-            if (!v) return '永久';
             return this.fmtBlockUntil(v);
         },
         async load() {

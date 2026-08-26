@@ -241,6 +241,8 @@
                     let v = getPath(r, this.prop);
                     if (v === undefined || v === null) v = '';
                     let label;
+                    // 空值统一渲染为"(空)"（如「封禁/解封时间」空=永久，语义上
+                    // 以空白呈现）；列定义 valueFormatter 时仅对非空值生效
                     if (v === '') label = '(空)';
                     else if (this.valueFormatter) label = this.valueFormatter(v);
                     else if (this.valueMap && this.valueMap[v] != null) label = this.valueMap[v];
