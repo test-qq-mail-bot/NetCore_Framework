@@ -139,8 +139,8 @@ template: `
             }
         },
         async delIp(row) {
-            if (row.type === 'whitelist') await http.delete('/api/security/whitelist', { data: { ip: row.ip } });
-            else await http.delete('/api/security/blacklist', { data: { ip: row.ip } });
+            if (row.type === 'whitelist') await http.delete('/api/security/whitelist', { params: { ip: row.ip } });
+            else await http.delete('/api/security/blacklist', { params: { ip: row.ip } });
             this.load();
         }
     },

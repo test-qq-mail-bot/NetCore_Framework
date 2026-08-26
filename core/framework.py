@@ -282,6 +282,18 @@ def create_app() -> FastAPI:
                 )
 
     # ---- SPA 入口与兜底路由 ----
+    # 站点图标（全站图标一律 SVG）：/favicon.svg 供 <link rel="icon"> 使用；
+    # /favicon.ico 兜底浏览器默认请求，避免落入 404 异常处理器刷控制台报错
+    _favicon_svg = FRONTEND_DIR / "favicon.svg"
+    if _favicon_svg.exists():
+        @app.get("/favicon.svg", include_in_schema=False)
+        async def favicon_svg():
+            return FileResponse(_favicon_svg, media_type="image/svg+xml")
+
+        @app.get("/favicon.ico", include_in_schema=False)
+        async def favicon_ico():
+            return FileResponse(_favicon_svg, media_type="image/svg+xml")
+
     @app.get("/api/plugins/frontend-manifest")
     async def frontend_manifest(_: str = Depends(get_current_user)):
         """返回所有插件 frontend/ 下的 JS 文件清单，供前端动态注入<script>。
