@@ -449,8 +449,8 @@
         },
         emits: ['sort-change', 'filter-change', 'page-change', 'selection-change', 'size-change'],
         mixins: [NC.SF_MIXIN],
-        data() { return { innerPage: this.page || 1 }; },
-        watch: { page(v) { this.innerPage = v || 1; } },
+        data() { return { innerPage: this.page || 1, innerPageSize: this.pageSize || ((typeof window !== 'undefined' && window.NC && window.NC.defaultPageSize) || 10) }; },
+        watch: { page(v) { this.innerPage = v || 1; }, pageSize(v) { if (v) this.innerPageSize = v; } },
         computed: {
             sorted() {
                 if (this.backend) return this.data || [];
@@ -463,7 +463,7 @@
             },
             shown() {
                 if (this.clientPaged && !this.backend) {
-                    const s = this.pageSize || 20, p = this.innerPage || 1;
+                    const s = this.innerPageSize || 20, p = this.innerPage || 1;
                     const start = (p - 1) * s;
                     return this.sorted.slice(start, start + s);
                 }
@@ -474,6 +474,11 @@
             },
         },
         methods: {
+            clearSelection() {
+                if (this.$refs.innerTable && this.$refs.innerTable.clearSelection) {
+                    this.$refs.innerTable.clearSelection();
+                }
+            },
             // 点号路径取值（metadata.version 等嵌套字段）
             pathGet(row, prop) {
                 if (!row || typeof row !== 'object' || !prop) return undefined;
@@ -512,7 +517,7 @@
         },
         template: `
         <div class="nc-table-wrap">
-          <el-table :data="shown" :stripe="stripe" :border="border" :max-height="maxHeight || undefined"
+          <el-table ref="innerTable" :data="shown" :stripe="stripe" :border="border" :max-height="maxHeight || undefined"
                     :empty-text="emptyText" :loading="loading" :row-key="rowKey"
                     @selection-change="e => $emit('selection-change', e)">
             <el-table-column v-if="selectable" type="selection" width="48" fixed="left"></el-table-column>
@@ -535,9 +540,9 @@
           </el-table>
           <div v-if="backend || clientPaged" class="nc-table-pager" style="margin-top:12px;display:flex;justify-content:flex-end;align-items:center;gap:12px;">
             <el-pagination background :layout="pageSizes.length ? 'total, sizes, prev, pager, next, jumper' : 'total, prev, pager, next'"
-                           :total="totalCount" :page-size="pageSize" :page-sizes="pageSizes"
+                           :total="totalCount" :page-size="innerPageSize" :page-sizes="pageSizes.length ? pageSizes : [5,10,20,50]"
                            :current-page="backend ? page : innerPage" @current-change="onPage"
-                           @size-change="s => $emit('size-change', s)"></el-pagination>
+                           @size-change="s => { innerPageSize = s; $emit('size-change', s); }"></el-pagination>
             <slot name="pager-extra"></slot>
           </div>
         </div>`,

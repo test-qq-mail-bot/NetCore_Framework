@@ -84,7 +84,7 @@ SYSTEM_NAME = "NetCore Framework"
 # 不再依赖手工同步的全局版本号）
 # core.yaml 恢复中文注释（文本级迁移，logging/session/https/debug 迁 user_config
 # 且不留「迁移自」标注）、log-level 落盘、审计记录配置修改前后差异、EXE 版本资源、
-SYSTEM_VERSION = "20260826-V6"
+SYSTEM_VERSION = "20260827-V1"
 
 # 全局配置缓存
 _config_cache = {}
@@ -479,6 +479,9 @@ def _ensure_user_config_defaults():
     if "auto_update_timezone" not in cfg["system"]:
         cfg["system"]["auto_update_timezone"] = True
         changed = True
+    if "default_page_size" not in cfg["system"]:
+        cfg["system"]["default_page_size"] = 10
+        changed = True
     if not isinstance(cfg.get("logging"), dict):
         cfg["logging"] = {
             "level": "INFO",
@@ -744,6 +747,7 @@ def _render_user_config_commented(cfg: dict) -> str:
     auto_logout = int(system.get("auto_logout_minutes", 5) or 5)
     timezone = _yaml_scalar_str(system.get("timezone", "Asia/Shanghai"))
     auto_update_timezone = _yaml_scalar_str(bool(system.get("auto_update_timezone", True)))
+    default_page_size = int(system.get("default_page_size", 10) or 10)
     logging_cfg = cfg.get("logging", {}) or {}
     notify_cfg = cfg.get("notify", {}) or {}
     https_cfg = cfg.get("https", {}) or {}
@@ -789,6 +793,7 @@ def _render_user_config_commented(cfg: dict) -> str:
     L.append("  auto_logout_minutes: " + str(auto_logout) + "  # 自动退出时间（分钟）：无操作超过该时长自动退出；0=关闭")
     L.append("  timezone: " + timezone + "  # 时区（IANA 名，如 Asia/Shanghai）；「登录自动更新时区」开启时登录后按浏览器时区覆盖")
     L.append("  auto_update_timezone: " + auto_update_timezone + "  # 登录自动更新时区：true=每次登录用浏览器时区自动覆盖上面的 timezone；false=固定用上面的 timezone")
+    L.append("  default_page_size: " + str(default_page_size) + "  # 表单默认翻页数据：表格每页显示条数（5/10/20/50 或自定义）")
     L.append("")
     L.append("# ---------- 认证相关 ----------")
     L.append("# 【如何修改登录密码】")

@@ -31,7 +31,7 @@ window.NC.registerPage('core_logs', {
       </div>
     </div>`,
     mixins: [window.NC.SF_MIXIN],
-    data() { return { level: 'INFO', levels: ['DEBUG', 'INFO', 'WARNING', 'ERROR'], allRows: [], page: 1, size: 10, loadError: '', levelLoading: false }; },
+    data() { return { level: 'INFO', levels: ['DEBUG', 'INFO', 'WARNING', 'ERROR'], allRows: [], page: 1, size: (window.NC && window.NC.defaultPageSize) || 10, loadError: '', levelLoading: false }; },
     computed: {
         cols() {
             return [

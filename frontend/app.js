@@ -182,6 +182,13 @@ const App = {
                     .catch(function () {});
             } catch (e) {}
         },
+        loadDefaultPageSize() {
+            try {
+                http.get('/api/system/basic-settings')
+                    .then(function (r) { try { window.NC.defaultPageSize = (r && r.data && r.data.default_page_size) || 10; } catch (e) { window.NC.defaultPageSize = 10; } })
+                    .catch(function () { window.NC.defaultPageSize = 10; });
+            } catch (e) { window.NC.defaultPageSize = 10; }
+        },
         async fetchMenus() { const r = await http.get('/api/system/menus'); this.menus = r.data.menus; },
         async fetchCoreConfig() {
             try {
@@ -310,7 +317,8 @@ const App = {
             try {
                 await this.fetchMenus();
                 await this.fetchCoreConfig();
-                this.loadLogLevel();
+            this.loadLogLevel();
+            this.loadDefaultPageSize();
                 this.loggedIn = true;
                 var p = location.pathname || '/dashboard';
                 if (p === '/' || p === '') p = '/dashboard';

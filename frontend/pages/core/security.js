@@ -38,7 +38,8 @@ template: `
             <el-date-picker v-model="ipExpires" type="date" placeholder="有效期至(可选)" value-format="YYYY-MM-DD"></el-date-picker>
             <el-button type="primary" @click="addIp">添加</el-button>
           </div>
-          <nc-table :data="merged" :columns="cols">
+          <nc-table :data="merged" :columns="cols" client-paged :page-size="pageSize" :page-sizes="[5,10,20,50]"
+                    @page-change="(p)=>{page=p;}" @size-change="(s)=>{pageSize=s;page=1;}">
             <template #col-type="{row}"><el-tag :type="row.type==='whitelist'?'success':'danger'">{{row.type==='whitelist'?'白名单':'黑名单'}}</el-tag></template>
             <template #col-time="{row}">
                 <!-- 最终口径：有效期空=永久 → 本列显示「永久」，筛选框同为「永久」；
@@ -56,7 +57,7 @@ template: `
         </div>
       </div>
     </div>`,
-    data() { return { policy: { max_failures: 5, block_minutes: 10, reset_interval_minutes: 30 }, whitelist: [], blacklist: [], ipInput: '', ipType: 'whitelist', blMin: null, ipNote: '', ipExpires: '', loadError: '' }; },
+    data() { return { policy: { max_failures: 5, block_minutes: 10, reset_interval_minutes: 30 }, whitelist: [], blacklist: [], ipInput: '', ipType: 'whitelist', blMin: null, ipNote: '', ipExpires: '', loadError: '', page: 1, pageSize: (window.NC && window.NC.defaultPageSize) || 10 }; },
     computed: {
         cols() {
             return [

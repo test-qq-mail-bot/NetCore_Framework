@@ -528,6 +528,7 @@ async def basic_settings_get(_: str = Depends(get_current_user)):
         "auto_logout_minutes": int(system.get("auto_logout_minutes", 5) or 5),
         "timezone": system.get("timezone", "Asia/Shanghai"),
         "auto_update_timezone": bool(system.get("auto_update_timezone", True)),
+        "default_page_size": int(system.get("default_page_size", 10) or 10),
         "domain": (get_user_config() or {}).get("https", {}).get("domain", ""),
         "https": {
             "enabled": bool(
@@ -550,6 +551,7 @@ class BasicSettingsRequest(BaseModel):
     timezone: str = "Asia/Shanghai"
     auto_update_timezone: bool = True
     domain: str = ""
+    default_page_size: int = 10
 
 
 @router_system.put("/system/basic-settings")
@@ -586,6 +588,16 @@ async def basic_settings_put(req: BasicSettingsRequest, _: str = Depends(get_cur
         tz = "Asia/Shanghai"
     cfg["system"]["timezone"] = tz
     cfg["system"]["auto_update_timezone"] = bool(req.auto_update_timezone)
+    # 表单默认翻页数据：5~100 范围，非法值回退默认 10
+    try:
+        dps = int(req.default_page_size)
+    except (TypeError, ValueError):
+        dps = 10
+    if dps < 1:
+        dps = 10
+    if dps > 100:
+        dps = 100
+    cfg["system"]["default_page_size"] = dps
     if "https" not in cfg or not isinstance(cfg["https"], dict):
         cfg["https"] = {}
     cfg["https"]["domain"] = req.domain.strip() if isinstance(req.domain, str) else ""

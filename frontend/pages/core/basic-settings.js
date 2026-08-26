@@ -31,6 +31,13 @@ window.NC.registerPage('core_basic', {
               <el-switch v-model="form.auto_update_timezone"></el-switch>
               <div class="nc-form-hint">勾选后，每次管理员登录自动把时区更新为<b>浏览器所在时区</b></div>
             </el-form-item>
+            <el-form-item label="表单默认翻页数据">
+              <div style="display:flex;gap:8px;align-items:center;">
+                <el-input-number v-model="form.default_page_size" :min="1" :max="100" controls-position="right" style="width:120px;"></el-input-number>
+                <el-button v-for="s in [5,10,20,50]" :key="s" size="small" @click="form.default_page_size=s">{{s}}</el-button>
+              </div>
+              <div class="nc-form-hint">表格组件每页默认显示条数，可在输入框内填入 1~100 的任意数字</div>
+            </el-form-item>
           </el-form>
         </div>
       </div>
@@ -112,7 +119,7 @@ window.NC.registerPage('core_basic', {
                      'America/Los_Angeles', 'Australia/Sydney', 'UTC', 'Etc/GMT-8', 'Etc/GMT+0'];
         return {
             form: { name: '', version: '', totp_enabled: false, auto_logout_minutes: 5,
-                    timezone: 'Asia/Shanghai', auto_update_timezone: true, domain: '' },
+                    timezone: 'Asia/Shanghai', auto_update_timezone: true, domain: '', default_page_size: 10 },
             timezones: tzs,
             saving: false, binding: false, verifying: false,
             totp: { show: false, secret: '', qrcode: '', otpauth_uri: '', code: '' },
