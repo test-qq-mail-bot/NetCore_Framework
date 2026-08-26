@@ -41,9 +41,9 @@ template: `
           <nc-table :data="merged" :columns="cols">
             <template #col-type="{row}"><el-tag :type="row.type==='whitelist'?'success':'danger'">{{row.type==='whitelist'?'白名单':'黑名单'}}</el-tag></template>
             <template #col-time="{row}">
-                <!-- 口径：本列只有「空值」和「日期时间」两种形态——
-                     空=永久（显示空白）；有值=该时间到点后自动解封（按系统时区换算） -->
-                <span>{{ row.time_raw ? row.block_until_cn : '' }}</span>
+                <!-- 最终口径：有效期空=永久 → 本列显示「永久」，筛选框同为「永久」；
+                     有值=有期限封禁 → 本列显示该日期时间（按系统时区换算），到点自动解封 -->
+                <span>{{ row.time_raw ? row.block_until_cn : '永久' }}</span>
             </template>
             <template #col-status="{row}">
                 <el-tag v-if="row.type==='blacklist'" :type="row.ban_state==='active'?'danger':(row.ban_state==='expired'?'info':'warning')">
