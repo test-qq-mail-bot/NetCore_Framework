@@ -241,10 +241,11 @@
                     let v = getPath(r, this.prop);
                     if (v === undefined || v === null) v = '';
                     let label;
-                    // 空值统一渲染为"(空)"（如「封禁/解封时间」空=永久，语义上
-                    // 以空白呈现）；列定义 valueFormatter 时仅对非空值生效
-                    if (v === '') label = '(空)';
-                    else if (this.valueFormatter) label = this.valueFormatter(v);
+                    // 列定义了 valueFormatter 时由其全权决定选项标签（含空值——
+                    // 如「封禁/解封时间」空=永久，筛选中须显示"永久"）；
+                    // 无格式化函数时才回退到默认文案（空值→"(空)"）
+                    if (this.valueFormatter) label = this.valueFormatter(v);
+                    else if (v === '') label = '(空)';
                     else if (this.valueMap && this.valueMap[v] != null) label = this.valueMap[v];
                     else label = String(v);
                     if (!map.has(label)) map.set(label, { value: v, label: label, count: 0 });

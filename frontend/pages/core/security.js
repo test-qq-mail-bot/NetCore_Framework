@@ -108,8 +108,10 @@ template: `
             const p = n => (n < 10 ? '0' : '') + n;
             return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
         },
-        // 封禁/解封时间列表头筛选标签：空值由框架层渲染为"(空)"，此处仅处理非空时间
+        // 封禁/解封时间列表头筛选标签（最终口径）：空值显示「永久」，
+        // 非空显示按配置时区换算后的时间；单元格则始终以空白表示永久
         fmtTimeRaw(v) {
+            if (!v) return '永久';
             return this.fmtBlockUntil(v);
         },
         async load() {
