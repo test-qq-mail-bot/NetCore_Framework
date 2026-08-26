@@ -166,6 +166,10 @@ const App = {
             this.loadLogLevel();
             // 统一插件版本号：从后端 /api/plugins/ 拉取并盖章各页面 jsVersions
             if (window.NC && NC.loadPluginVersions) { try { await NC.loadPluginVersions(); } catch (e) {} }
+            // 关键修复：若页面打开时尚未登录（或令牌已失效），挂载期的 loadPluginFrontends
+            // 会因清单接口 401 而降级跳过，导致所有插件页面组件永不注册——表现为
+            // 「菜单可见但点任何插件页面都空白」。此处登录成功拿到新令牌后补拉一次。
+            if (!this._ncPluginsLoaded && this._ncApp) this.loadPluginFrontends(this._ncApp);
             if (!this.menus.length) this.currentPath = '/dashboard';
             else this.navigate('/dashboard');
             this.startIdleWatcher();
@@ -360,6 +364,10 @@ const App = {
         },
         // 启动后拉取插件前端清单，动态注入 <script>，实现插件网页留在插件文件夹
         async loadPluginFrontends(app) {
+            // 幂等保护：挂载期首拉成功后，登录补拉等后续调用直接跳过，
+            // 避免插件脚本顶层逻辑被重复执行（重复绑定事件/轮询等副作用）。
+            // 仅当首拉失败（如未登录时 401）才保持未标记，允许登录后重试。
+            if (this._ncPluginsLoaded) return;
             try {
                 // 审查修复：清单接口实际挂了 get_current_user（需已登录会话），
                 // 原注释「公开接口」与实现不符，已更正。
@@ -388,9 +396,11 @@ const App = {
                 }
                 this.registerAllPages(app);
                 this.pagesVersion++;
+                this._ncPluginsLoaded = true;
             } catch (e) {
-                // 即便清单拉取彻底失败，也仅降级提示，绝不阻塞框架与其他页面
-                console.info('[NC] 插件前端清单加载失败（不影响框架与核心页面）：', e && (e.message || e));
+                // 清单拉取失败不阻塞框架与核心页面；典型场景是打开页面时还未登录
+                // （清单接口 401），登录成功后 onLoggedIn 会带新令牌补拉一次。
+                console.info('[NC] 插件前端清单加载失败（登录后将自动补拉）：', e && (e.message || e));
             }
         }
     },
@@ -582,5 +592,7 @@ window.NC.fmtTime = function (v) {
 
 const vm = app.mount('#app');
 if (vm && vm.loadPluginFrontends) {
+    // 持有 app 引用供登录成功后的补拉使用（见 onLoggedIn）
+    vm._ncApp = app;
     vm.loadPluginFrontends(app);
 }
