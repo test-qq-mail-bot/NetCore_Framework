@@ -49,3 +49,53 @@ def to_utc_str(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.astimezone()  # 附上本机时区
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def configured_timezone() -> str:
+    """读取 user_config.yaml 的 system.timezone（缺省 Asia/Shanghai）。
+
+    延迟导入 config_loader 避免循环依赖；读取失败一律回退默认值，
+    绝不让展示层的时间换算拖垮业务调用方。
+    """
+    try:
+        from core.config_loader import get_user_config
+        return ((get_user_config().get("system", {}) or {}).get("timezone")
+                or "Asia/Shanghai")
+    except Exception:  # noqa: BLE001
+        return "Asia/Shanghai"
+
+
+def fmt_utc(ts):
+    """UTC 时间戳 → 配置时区「YYYY-MM-DD HH:MM:SS」（全站唯一显示口径）。
+
+    兼容入库的各种形态：2026-08-26T07:36:57.569Z / ...+00:00 /
+    「YYYY-MM-DD HH:MM:SS」空格分隔。解析失败或非字符串原样返回，
+    绝不因单条脏数据中断调用方（导出/通知渲染等批量场景）。
+    """
+    if not isinstance(ts, str) or len(ts) < 19:
+        return ts
+    base = ts.strip()
+    dt = None
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(base[:19], fmt).replace(tzinfo=timezone.utc)
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        return ts
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.astimezone(ZoneInfo(configured_timezone())).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:  # noqa: BLE001
+        return ts
+
+
+def now_local_str() -> str:
+    """当前时刻按配置时区的「YYYY-MM-DD HH:MM:SS」（通知模板等展示场景用）。"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(timezone.utc).astimezone(
+            ZoneInfo(configured_timezone())).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:  # noqa: BLE001
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

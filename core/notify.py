@@ -27,6 +27,7 @@ from core.config_loader import (
 from core.crypto_utils import CryptoUtils
 from core.gotemplate import GoTemplate
 from core.logger import get_logger
+from core.timeutil import now_local_str
 
 logger = get_logger()
 
@@ -159,7 +160,7 @@ class NotifyManager:
                 "Content": content,
                 "Priority": priority,
                 "Channel": channel,
-                "Time": datetime.now(timezone.utc).isoformat(),
+                "Time": now_local_str(),
                 "Source": source,
                 "Extra": extra or {},
             }
@@ -274,7 +275,7 @@ class NotifyManager:
             "Content": "这是一条来自 NetCore Framework 的测试消息。",
             "Priority": "normal",
             "Channel": channel,
-            "Time": datetime.now(timezone.utc).isoformat(),
+            "Time": now_local_str(),
             "Source": "system",
             "Extra": {},
         }

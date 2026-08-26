@@ -84,7 +84,7 @@ SYSTEM_NAME = "NetCore Framework"
 # 不再依赖手工同步的全局版本号）
 # core.yaml 恢复中文注释（文本级迁移，logging/session/https/debug 迁 user_config
 # 且不留「迁移自」标注）、log-level 落盘、审计记录配置修改前后差异、EXE 版本资源、
-SYSTEM_VERSION = "20260826-V4"
+SYSTEM_VERSION = "20260826-V5"
 
 # 全局配置缓存
 _config_cache = {}
@@ -110,9 +110,16 @@ failure_policy:
   block_minutes: 10       # 封禁时长（分钟）
   reset_interval_minutes: 30  # 失败计数重置间隔（分钟）
 
-whitelist: []             # IP 白名单：受信任来源 IP（如管理员办公 IP），仅作「免锁定放行」用途，并非防火墙。
+whitelist:                # IP 白名单：受信任来源 IP（如管理员办公 IP），仅作「免锁定放行」用途，并非防火墙。
                           # 命中白名单的 IP 直接放行且不受登录失败锁定策略约束；不会因此限制其他正常用户访问。
                           # 条目可带说明与有效期：{ip: "x.x.x.x", note: "管理员办公IP", expires_at: "2026-12-31T23:59:59"}
+  # 以下回环条目仅在本文件首次创建时写入；此后框架不再自动增删，可按需移除
+  - ip: "127.0.0.1"
+    note: "系统初始化-本地管理通道"
+    expires_at: null
+  - ip: "::1"
+    note: "系统初始化-本地管理通道"
+    expires_at: null
   # - ip: "192.168.1.100"
   #   note: "管理员办公IP"
   #   expires_at: "2026-12-31T23:59:59"
@@ -555,42 +562,6 @@ def _ensure_user_config_defaults():
             pass
 
 
-def _ensure_loopback_whitelist():
-    """自动将回环地址写入 security.yaml 白名单（127.0.0.1 + ::1，永久有效）。
-
-    取消 security.py 中硬编码的回环放行后，改为由白名单统一管理。
-    每次启动检查：若白名单中不存在回环条目则自动补齐，已存在则跳过。
-    """
-    try:
-        from core.security import _entry_ip
-        p = CONFIG_DIR / "security.yaml"
-        if not p.exists():
-            return
-        cfg = _read_yaml(p) or {}
-        wl = cfg.get("whitelist") or []
-        loopback_ips = {"127.0.0.1", "::1"}
-        existing = {_entry_ip(e) for e in wl}
-        added = False
-        for ip in loopback_ips:
-            if ip not in existing:
-                wl.append({"ip": ip, "note": "系统初始化-本地管理通道", "expires_at": None})
-                added = True
-        if added:
-            cfg["whitelist"] = wl
-            _atomic_write_text(p, _render_security_config_commented(cfg))
-            try:
-                from core.logger import get_logger
-                get_logger().info("已自动将回环地址（127.0.0.1 + ::1）写入白名单")
-            except Exception:  # noqa: BLE001
-                pass
-    except Exception as exc:
-        try:
-            from core.logger import get_logger
-            get_logger().warning("自动补齐回环白名单失败：%s", exc)
-        except Exception:  # noqa: BLE001
-            pass
-
-
 def _strip_yaml_sections(text: str, sections: set) -> str:
     """按「顶级键」文本级删除 YAML 段，保留其余段落与中文注释。
 
@@ -735,7 +706,6 @@ def bootstrap():
     refresh_detected_plugins()   # 每次启动重新扫描插件目录，更新 detected 列表
     _migrate_legacy_core_sections()  # 旧 core.yaml 遗留 logging/notify/session/https/debug 迁移（保留注释）
     _ensure_user_config_defaults()  # 自动补齐缺失默认键（timezone/logging/notify/session/https/debug）
-    _ensure_loopback_whitelist()    # 自动将回环地址写入白名单（127.0.0.1 + ::1，永久有效）
     _recomment_existing_configs()
     _config_cache.clear()
 

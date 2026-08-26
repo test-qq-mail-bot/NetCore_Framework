@@ -41,12 +41,10 @@ template: `
           <nc-table :data="merged" :columns="cols">
             <template #col-type="{row}"><el-tag :type="row.type==='whitelist'?'success':'danger'">{{row.type==='whitelist'?'白名单':'黑名单'}}</el-tag></template>
             <template #col-time="{row}">
-                <span v-if="row.type==='blacklist'">
-                  <template v-if="row.ban_state==='permanent'">永久封禁</template>
-                  <template v-else-if="row.ban_state==='expired'"><span style="color:var(--nc-text-secondary);">已于 {{row.block_until_cn}} 解封</span></template>
-                  <template v-else>至 {{row.block_until_cn}}<br><span style="color:var(--nc-text-secondary);">剩 {{row.remain}}</span></template>
-                </span>
-                <span v-else>{{row.expires}}<span v-if="row.expires && row.expires!=='永久'" style="color:var(--nc-text-secondary);">（{{row.weekday}}）</span></span>
+                <!-- 口径统一：本列只显示「永久」或换算后的具体时间；
+                     封禁状态/剩余时长等语义由「状态」列标签承担 -->
+                <span v-if="row.type==='blacklist'">{{ row.time_raw ? row.block_until_cn : '永久' }}</span>
+                <span v-else>{{ row.expires }}</span>
             </template>
             <template #col-status="{row}">
                 <el-tag v-if="row.type==='blacklist'" :type="row.ban_state==='active'?'danger':(row.ban_state==='expired'?'info':'warning')">

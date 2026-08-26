@@ -326,22 +326,9 @@ AUDIT_EXPORT_MAX = 20000
 
 
 def _fmt_audit_ts(ts):
-    """审计导出用：UTC 时间戳 → user_config.yaml timezone 的显示时间。
-
-    入库值形如 2026-08-26T07:36:57.569Z（UTC，毫秒精度）；导出统一换算为
-    配置时区的 YYYY-MM-DD HH:MM:SS（与前端 fmtTime 口径一致）。
-    解析失败或时区无效时原样返回，绝不因单条脏数据中断整个导出。
-    """
-    try:
-        from zoneinfo import ZoneInfo
-        if not isinstance(ts, str) or len(ts) < 19:
-            return ts
-        dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-        tz_name = ((get_user_config().get("system", {}) or {}).get("timezone")
-                   or "Asia/Shanghai")
-        return dt.astimezone(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:  # noqa: BLE001
-        return ts
+    """审计导出用：UTC 时间戳 → 配置时区显示时间（统一实现见 core/timeutil.fmt_utc）。"""
+    from core.timeutil import fmt_utc
+    return fmt_utc(ts)
 
 
 @router_audit.get("/logs/audit/export")
