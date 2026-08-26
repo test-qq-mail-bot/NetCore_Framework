@@ -50,10 +50,9 @@ Thumbs.db
 build_generated*
 
 # ===== 测试 / 覆盖率（补充）=====
+# 注意：tests/ 必须进仓库（CI quality gate 依赖 pytest tests），此处只忽略缓存与报告
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .nox/
-tests/
-test/

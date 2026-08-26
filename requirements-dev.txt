@@ -1,0 +1,6 @@
+# NetCore Framework 开发 / 构建期依赖清单（与运行时 requirements.txt 分离）
+# 精确锁定，禁止任何版本范围约束；CI 的 Lint & Test 与 PyInstaller 构建均使用本文件
+pytest==9.1.1
+ruff==0.16.4
+# PyInstaller 仅构建期使用（Windows EXE / Linux 单文件打包）
+pyinstaller==6.22.2
