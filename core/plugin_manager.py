@@ -154,8 +154,9 @@ class PluginManager:
 
     @staticmethod
     def _load_plugin_config(name: str) -> dict:
-        # 优先读取 config/ 子目录下的插件配置；兼容旧版直接放在插件根目录的 config.yaml
+        # 优先读取 data/ 子目录下的插件配置；兼容旧版 config/ 与根目录
         for candidate in (
+            PLUGINS_DIR / name / "data" / "config.yaml",
             PLUGINS_DIR / name / "config" / "config.yaml",
             PLUGINS_DIR / name / "config.yaml",
         ):
