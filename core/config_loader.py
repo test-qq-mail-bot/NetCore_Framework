@@ -84,7 +84,7 @@ SYSTEM_NAME = "NetCore Framework"
 # 不再依赖手工同步的全局版本号）
 # core.yaml 恢复中文注释（文本级迁移，logging/session/https/debug 迁 user_config
 # 且不留「迁移自」标注）、log-level 落盘、审计记录配置修改前后差异、EXE 版本资源、
-SYSTEM_VERSION = "20260826-V3"
+SYSTEM_VERSION = "20260826-V4"
 
 # 全局配置缓存
 _config_cache = {}
@@ -332,7 +332,7 @@ def _write_default_configs():
             },
             "logging": {
                 "level": "INFO",
-                "file": "data/logs/netcore.log",
+                "file": "data/logs/",
                 "max_bytes": 10485760,
                 "backup_count": 30,
                 "audit_log_retention_days": 60,
@@ -475,7 +475,7 @@ def _ensure_user_config_defaults():
     if not isinstance(cfg.get("logging"), dict):
         cfg["logging"] = {
             "level": "INFO",
-            "file": "data/logs/netcore.log",
+            "file": "data/logs/",
             "max_bytes": 10485760,
             "backup_count": 30,
             "audit_log_retention_days": 60,
@@ -778,7 +778,7 @@ def _render_user_config_commented(cfg: dict) -> str:
     notify_cfg = cfg.get("notify", {}) or {}
     https_cfg = cfg.get("https", {}) or {}
     log_level = _yaml_scalar_str(logging_cfg.get("level", "INFO"))
-    log_file = _yaml_scalar_str(logging_cfg.get("file", "data/logs/netcore.log"))
+    log_file = _yaml_scalar_str(logging_cfg.get("file", "data/logs/"))
     log_max_bytes = int(logging_cfg.get("max_bytes", 10485760) or 10485760)
     log_backup = int(logging_cfg.get("backup_count", 30) or 30)
     log_retention = int(logging_cfg.get("audit_log_retention_days", 60) or 60)

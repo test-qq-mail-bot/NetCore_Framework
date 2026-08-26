@@ -325,6 +325,25 @@ async def audit_query(
 AUDIT_EXPORT_MAX = 20000
 
 
+def _fmt_audit_ts(ts):
+    """审计导出用：UTC 时间戳 → user_config.yaml timezone 的显示时间。
+
+    入库值形如 2026-08-26T07:36:57.569Z（UTC，毫秒精度）；导出统一换算为
+    配置时区的 YYYY-MM-DD HH:MM:SS（与前端 fmtTime 口径一致）。
+    解析失败或时区无效时原样返回，绝不因单条脏数据中断整个导出。
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        if not isinstance(ts, str) or len(ts) < 19:
+            return ts
+        dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        tz_name = ((get_user_config().get("system", {}) or {}).get("timezone")
+                   or "Asia/Shanghai")
+        return dt.astimezone(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:  # noqa: BLE001
+        return ts
+
+
 @router_audit.get("/logs/audit/export")
 async def audit_export(
     fmt: str = Query("csv", pattern="^(csv|json)$"),
@@ -356,7 +375,11 @@ async def audit_export(
 
         def gen_json():
             for rec in records:
-                yield _json.dumps(rec, ensure_ascii=False) + "\n"
+                out = dict(rec)
+                # 导出即显示口径：时间换算为配置时区并去 T/Z/毫秒，字段名
+                # timestamp_utc 同步更名 timestamp（值不再是 UTC）
+                out["timestamp"] = _fmt_audit_ts(out.pop("timestamp_utc", None))
+                yield _json.dumps(out, ensure_ascii=False) + "\n"
             if truncated:
                 # 以一条元信息记录标注截断，便于下游程序识别
                 yield _json.dumps(
@@ -385,10 +408,10 @@ async def audit_export(
                 return "'" + v
             return v
 
-        writer.writerow(["timestamp_utc", "ip", "username", "action", "result", "detail"])
+        writer.writerow(["timestamp", "ip", "username", "action", "result", "detail"])
         yield flush()
         for rec in records:
-            writer.writerow([_csv_safe(rec.get("timestamp_utc")), _csv_safe(rec.get("ip")),
+            writer.writerow([_csv_safe(_fmt_audit_ts(rec.get("timestamp_utc"))), _csv_safe(rec.get("ip")),
                              _csv_safe(rec.get("username")), _csv_safe(rec.get("action")),
                              _csv_safe(rec.get("result")), _csv_safe(rec.get("detail"))])
             yield flush()

@@ -42,7 +42,7 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/logs/audit` | 分页查询。参数 `page/size(≤10000)/ip/result/action/start_date/end_date/sort_by/sort_order/filter_col/filter_values` |
-| GET | `/api/logs/audit/export` | 导出 CSV / JSONL。`fmt=csv\|json`、`limit≤20000`；超出响应头标 `X-Audit-Truncated: true` |
+| GET | `/api/logs/audit/export` | 导出 CSV / JSONL。`fmt=csv\|json`、`limit≤20000`；超出响应头标 `X-Audit-Truncated: true`。时间字段按 `user_config.yaml` 的 `timezone` 换算为 `YYYY-MM-DD HH:MM:SS`（CSV 表头 / JSONL 字段名为 `timestamp`，不再是 UTC 原始值） |
 | DELETE | `/api/logs/audit/clean` | 清理全部审计日志 |
 
 ## 系统（/api/system）

@@ -103,6 +103,10 @@ template: `
     methods: {
         fmtBlockUntil(iso) {
             if (!iso) return '永久';
+            // 统一走 NC.fmtTime（按 user_config.yaml 时区换算、去 T/Z/毫秒）。
+            // 修复：此前用 new Date + 本地 getter 按**浏览器**时区显示，
+            // 与全站「配置时区」口径不一致。
+            if (window.NC && window.NC.fmtTime) return window.NC.fmtTime(iso);
             const d = new Date(iso);
             if (isNaN(d.getTime())) return iso;
             const p = n => (n < 10 ? '0' : '') + n;

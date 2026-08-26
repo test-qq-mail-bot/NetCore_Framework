@@ -35,7 +35,10 @@ window.NC.registerPage('core_logs', {
     computed: {
         cols() {
             return [
-                { label: '时间', prop: 'timestamp_utc', width: 220, sortable: true, filterable: true, slotName: 'col-timestamp_utc' },
+                { label: '时间', prop: 'timestamp_utc', width: 220, sortable: true, filterable: true, slotName: 'col-timestamp_utc',
+                  // 筛选下拉框选项标签同步格式化（换算时区、去 T/Z/毫秒），
+                  // 否则选项列表会显示原始 UTC 串（如 2026-08-26T07:36:57.569Z）
+                  valueFormatter: function (v) { return (window.NC && window.NC.fmtTime) ? window.NC.fmtTime(v) : String(v); } },
                 { label: 'IP', prop: 'ip', width: 140, sortable: true, filterable: true },
                 { label: '操作', prop: 'action', width: 180, sortable: true, filterable: true },
                 { label: '结果', prop: 'result', width: 100, sortable: true, filterable: true, slotName: 'col-result' },
