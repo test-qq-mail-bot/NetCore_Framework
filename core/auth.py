@@ -22,6 +22,7 @@ from core.config_loader import (
     DATA_DIR,
     get_core_config,
     get_encryption_key,
+    get_transport_encryption_key,
     get_user_config,
     save_user_config,
 )
@@ -149,7 +150,13 @@ def decode_token(token: str) -> dict:
 
 
 def decrypt_field(value: str) -> str:
-    """使用框架密钥解密前端传来的加密字段"""
+    """解密前端传来的加密字段（登录凭证）。
+
+    审查修复：/api/system/crypto-key 现下发的是**传输派生密钥**
+    （get_transport_encryption_key，HMAC 派生），不再暴露落盘加密主密钥。
+    解密顺序：传输子密钥 → 主密钥（兼容升级瞬间仍缓存旧 JS、用主密钥加密的
+    在途请求）→ 均失败按明文处理并留痕（便于调试/测试，且不静默）。
+    """
     if not value:
         return ""
     # 形态预判：仅当值像密文（合法 base64 且至少 nonce12 + tag16 + 1 字节）才尝试解密。
@@ -161,17 +168,26 @@ def decrypt_field(value: str) -> str:
         return value
     if len(raw) < 28:
         return value
+    last_exc = None
+    for key in (get_transport_encryption_key(), get_encryption_key()):
+        try:
+            return CryptoUtils.decrypt(value, key)
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+    # 兼容未加密的明文（便于调试/测试）：仍然回退，但必须留痕。
+    # 若前端加密链路损坏或密钥与前端不一致，静默回退会让凭证以明文进入业务流程
+    # 而无人察觉，因此记录告警与审计。
+    logger.warning(
+        "字段解密失败，已按明文处理（请检查前端加密与服务端传输密钥是否一致）：%s",
+        last_exc,
+    )
+    # 审查报告 #7：解密降级时记审计日志，便于安全页展示计数
     try:
-        return CryptoUtils.decrypt(value, get_encryption_key())
-    except Exception as exc:  # noqa: BLE001
-        # 兼容未加密的明文（便于调试/测试）：仍然回退，但必须留痕。
-        # 若前端加密链路损坏或 crypto.encryption_key 与前端不一致，
-        # 静默回退会让凭证以明文进入业务流程而无人察觉，因此记录告警。
-        logger.warning(
-            "字段解密失败，已按明文处理（请检查前端加密与 core.yaml 的 crypto.encryption_key 是否一致）：%s",
-            exc,
-        )
-        return value
+        from core.audit import audit_log
+        audit_log("login_plaintext_fallback", "凭证解密失败回退明文", "failed")
+    except Exception:  # noqa: BLE001
+        pass
+    return value
 
 
 def authenticate(username: str, password: str, totp_code: str = None) -> dict:
@@ -205,11 +221,18 @@ def authenticate(username: str, password: str, totp_code: str = None) -> dict:
             return {"success": False, "message": "TOTP 验证码错误", "totp_required": True}
 
     token = create_token(real_username)
-    # 记录上次登录信息
-    new_cfg = get_user_config()
-    new_cfg.setdefault("auth", {})["last_login_time"] = datetime.now(timezone.utc).isoformat()
-    new_cfg["auth"]["last_login_ip"] = ctx_client_ip.get() or "127.0.0.1"
-    save_user_config(new_cfg)
+    # 记录上次登录信息（审查修复：改用受锁保护的读-改-写入口 update_user_config，
+    # 此前 get 缓存对象→改→save 的序列在并发登录时互相覆盖丢更新）
+    try:
+        from core.config_loader import update_user_config
+
+        def _touch_last_login(c: dict):
+            c.setdefault("auth", {})["last_login_time"] = datetime.now(timezone.utc).isoformat()
+            c["auth"]["last_login_ip"] = ctx_client_ip.get() or "127.0.0.1"
+
+        update_user_config(_touch_last_login)
+    except Exception:  # noqa: BLE001
+        logger.debug("记录上次登录信息失败（忽略）")
     audit_log("login_attempt", "登录成功", "success", username=username)
     return {"success": True, "token": token, "totp_required": bool(user_cfg.get("totp_enabled")),
             "message": "登录成功"}
@@ -257,10 +280,10 @@ def verify_totp(code: str, secret: str = None) -> bool:
         try:
             use_secret = CryptoUtils.decrypt(pending, get_encryption_key())
         except Exception:  # noqa: BLE001
-            use_secret = secret
+            use_secret = ""
     else:
-        # 兼容旧流程：无服务端暂存时回退客户端传入（不推荐）
-        use_secret = secret
+        # 审查报告 #11：删除遗留回退——无服务端暂存时拒绝，必须先走 setup_totp 流程
+        use_secret = ""
     if not use_secret:
         return False
     try:

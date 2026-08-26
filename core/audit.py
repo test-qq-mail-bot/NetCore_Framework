@@ -12,7 +12,7 @@ audit.py - 统一审计日志接口
 import json
 import threading
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config_loader import AUDIT_DIR
@@ -137,8 +137,8 @@ def query_audit(page: int = 1, size: int = 50, ip: str = None, result: str = Non
 def clean_audit():
     """清理**全部**审计日志文件（尽力而为，删除被拦截时不报错）。
 
-    注意：这里是一次性清空，不区分日期；core.yaml 的
-    logging.audit_log_retention_days 目前只是预留配置，并未在此生效。
+    注意：这里是一次性清空，不区分日期；按保留天数自动过期请见
+    cleanup_audit_by_retention（框架启动时调用）。
     返回实际删除成功的文件数。
     """
     count = 0
@@ -150,3 +150,34 @@ def clean_audit():
             # 删除被环境（如安全删除机制）拦截时，跳过该文件，不阻断清理流程
             pass
     return count
+
+
+def cleanup_audit_by_retention() -> int:
+    """按 user_config 的 logging.audit_log_retention_days 自动清理过期审计日志。
+
+    此前该配置项只是预留（从未生效），清理手段只有一次性全清的 clean_audit。
+    现由框架启动时调用本函数：删除文件名日期早于「今天 - 保留天数」的审计文件。
+    - 配置为 0 / 负数 / 非法值时不做任何删除（显式关闭自动清理）；
+    - 文件名格式 audit-YYYYMMDD.log，按字典序比较即等价于日期比较；
+    - 写入按本地日期命名、此处按 UTC 计算截止日，存在 ±1 天误差，可接受。
+    返回删除的文件数。
+    """
+    try:
+        from core.config_loader import get_user_config
+        raw = (get_user_config().get("logging") or {}).get("audit_log_retention_days")
+        days = int(raw)
+    except Exception:  # noqa: BLE001
+        return 0
+    if days <= 0 or not AUDIT_DIR.exists():
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%d")
+    removed = 0
+    for f in AUDIT_DIR.glob("audit-*.log"):
+        stem = f.stem.replace("audit-", "")
+        if len(stem) == 8 and stem.isdigit() and stem < cutoff:
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed

@@ -99,10 +99,8 @@ class SecurityManager:
         也不应再为该值保留分支。
         """
         cfg = get_security_config()
-        # 安全兜底：回环地址（本地管理通道）永远放行，
-        # 避免管理员因白名单配置错误（如只加了某远端 IP）而把自己锁在门外。
-        if ip in ("127.0.0.1", "::1") or ip.startswith("127."):
-            return ("allow", None)
+        # 回环地址不再硬编码放行，改由初始化时自动写入白名单（127.0.0.1 + ::1，永久有效）。
+        # 如管理员误删白名单中的回环条目导致本地无法访问，需在服务器上手动编辑 security.yaml 恢复。
 
         # 1) 白名单：受信任 IP 直接放行（且免锁定，见 record_failure）
         wl_match = _ip_match(ip, cfg.get("whitelist", []) or [])

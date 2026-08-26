@@ -63,14 +63,16 @@ class NotifyManager:
     """通知管理器（单例）"""
 
     def __init__(self):
+        self._lock = threading.Lock()
+        self._last_send = {}
         self.reload()
 
     def reload(self):
-        """重新加载通知配置与加密密钥"""
+        """重新加载通知配置与加密密钥（审查报告 #21：复用实例锁，仅清 _last_send）"""
         self.config = get_notify_config()
         self.key = get_encryption_key()
-        self._last_send = {}  # channel -> 上次发送时间戳
-        self._lock = threading.Lock()
+        with self._lock:
+            self._last_send.clear()
 
     # ---------------- 加解密辅助 ----------------
     def _decrypt(self, value):

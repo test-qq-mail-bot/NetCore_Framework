@@ -43,10 +43,39 @@ class PluginManager:
 
     # ---------------- 加载 ----------------
     def load_all(self):
-        """根据关闭列表加载所有插件（故障隔离）"""
+        """根据关闭列表加载所有插件（故障隔离）
+
+        审查修复：加载前先卸载现存实例。此前 plugin_toggle（运行期启停）调用
+        本方法时，会对**所有**已启用插件再次执行 _load_plugin——重复实例化、
+        二次触发 on_load（后台线程/调度任务成倍增加），且旧实例永不 on_unload。
+        现统一「先卸旧、再装新」。
+        注意：Starlette 无法在运行期摘除已 include 的路由，因此禁用插件后其
+        API 路由仍会保留到下次重启；本方法保证的是**生命周期语义**正确
+        （旧实例被关闭、新实例只加载一份），路由层语义见 mount_routes 注释。
+        """
+        # 审查修复：将程序目录 plugins（dist/plugins）挂入 plugins 包的模块搜索路径，
+        # 使 EXE 打包之外手工部署的插件（独立仓库）也能被 importlib 找到。
+        # 默认 plugins 包解析到打包内 _MEIPASS/plugins（仅框架自带插件），
+        # 不挂载则外部插件 import 时报 No module named 'plugins.<name>'。
+        try:
+            import plugins as _plugins_pkg
+            _p = str(PLUGINS_DIR)
+            if _p not in [str(x) for x in _plugins_pkg.__path__]:
+                _plugins_pkg.__path__.append(_p)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("挂载外部插件目录到 plugins 包失败：%s", exc)
         discovered = self.discover()
         disabled = get_user_config().get("plugins", {}).get("disabled") or []
         disabled_set = set(disabled)
+        # 先优雅关闭全部现存实例，再清空注册表重新加载（避免重复实例与状态残留）
+        with self._lock:
+            existing = [
+                e.get("instance") for e in self.plugins.values()
+                if isinstance(e, dict)
+            ]
+            self.plugins.clear()
+        for inst in existing:
+            self._unload_instance(inst)
         for name in discovered:
             if name in disabled_set:
                 self.plugins[name] = {
@@ -55,6 +84,31 @@ class PluginManager:
                 }
             else:
                 self._load_plugin(name)
+
+    @staticmethod
+    def _unload_instance(instance, timeout: int = 5):
+        """优雅关闭单个插件实例（带超时、异常不阻断）。
+
+        抽取自 reload()：load_all 与 reload 共用同一卸载路径。
+        """
+        if instance is None:
+            return
+        try:
+            import threading as _t
+
+            def _do():
+                try:
+                    instance.on_unload()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            th = _t.Thread(target=_do, daemon=True)
+            th.start()
+            th.join(timeout)
+            if th.is_alive():
+                logger.warning("插件 on_unload 超时（%d 秒），放弃等待", timeout)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("插件 on_unload 异常：%s", exc)
 
     def _load_plugin(self, name: str):
         try:
@@ -117,25 +171,8 @@ class PluginManager:
             entry = self.plugins.get(name)
         if entry is None:
             return {"success": False, "message": "插件不存在"}
-        # 优雅关闭
-        instance = entry.get("instance")
-        if instance is not None:
-            try:
-                import threading as _t
-
-                def _unload():
-                    try:
-                        instance.on_unload()
-                    except Exception:  # noqa: BLE001
-                        pass
-
-                t = _t.Thread(target=_unload, daemon=True)
-                t.start()
-                t.join(timeout)
-                if t.is_alive():
-                    logger.warning("插件 %s 关闭超时（%d秒）", name, timeout)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("插件 %s 关闭异常：%s", name, exc)
+        # 优雅关闭（与 load_all 共用同一卸载路径）
+        self._unload_instance(entry.get("instance"), timeout=timeout)
         # 重新加载模块
         try:
             module = entry.get("module")
@@ -221,7 +258,14 @@ class PluginManager:
             return menus
 
     def mount_routes(self, app):
-        """将各插件的 APIRouter 挂载到 FastAPI 应用（幂等：基于已挂载集合防重）"""
+        """将各插件的 APIRouter 挂载到 FastAPI 应用（幂等：基于已挂载集合防重）
+
+        路由语义（审查修复时明确）：Starlette 不支持运行期摘除已 include 的路由，
+        因此「禁用插件」只影响生命周期（实例被卸载、不再加载），其已挂载的
+        API 路由会保留到下次重启；同理，运行期 reload 成功后新 router 会追加
+        到路由表尾部，旧 router 仍在前优先匹配——**路由级变更需重启完全生效**。
+        本框架单用户内网工具的定位下，此限制可接受，但必须在文档/UI 中明示。
+        """
         self._app = app
         with self._lock:
             for name, entry in self.plugins.items():

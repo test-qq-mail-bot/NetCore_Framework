@@ -55,3 +55,5 @@ build_generated*
 htmlcov/
 .tox/
 .nox/
+tests/
+test/

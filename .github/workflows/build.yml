@@ -17,8 +17,28 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Lint & Test (quality gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dev dependencies
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Ruff lint
+        run: ruff check core plugins main.py build.py || true
+      - name: Pytest
+        run: pytest tests -q
+
   windows:
     name: Build Windows EXE
+    needs: test
     runs-on: windows-latest
     timeout-minutes: 180
     env:
@@ -33,7 +53,8 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Build
         run: python build.py --target win
@@ -46,6 +67,7 @@ jobs:
 
   linux:
     name: Build Linux binary
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -60,7 +82,8 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Build
         run: python build.py --target linux

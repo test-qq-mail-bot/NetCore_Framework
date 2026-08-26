@@ -10,12 +10,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import core.api as api
 from core.audit import ctx_client_ip
+from core.auth import get_current_user
 from core.config_loader import BASE_DIR, FRONTEND_DIR, WIKI_DIR, PLUGINS_DIR, SYSTEM_VERSION, bootstrap
 from core.logger import get_logger, setup_logger
 from core.notify import get_notify_manager
@@ -58,6 +59,11 @@ def _sync_plugin_frontend_orphans(meipass: Path) -> None:
     /api/plugins/frontend-manifest 目录扫描继续注入到页面。
     此处仅针对**插件 frontend 静态 JS**做精确同步删除，绝不触碰
     data/logs 等运行时目录，用户数据不受影响。
+
+    关键约束（修复：外部插件前端被误删）：EXE 打包仅包含底层框架自身插件；
+    dist/plugins/ 下其余插件（用户按独立仓库手工部署，如 NetCore-cmdb、
+    NetCore-ops_toolbox 等）不在打包清单内，其前端**绝不清理**——仅对
+    打包内真实存在的插件做孤儿同步。
     """
     src_plugins = meipass / "plugins"
     dst_plugins = BASE_DIR / "plugins"
@@ -65,7 +71,10 @@ def _sync_plugin_frontend_orphans(meipass: Path) -> None:
         return
     for dst_fe in dst_plugins.glob("*/frontend"):
         src_fe = src_plugins / dst_fe.parent.name / "frontend"
-        src_names = {i.name for i in src_fe.iterdir()} if src_fe.is_dir() else set()
+        if not src_fe.is_dir():
+            # 打包内不存在该插件（用户手动部署的外部插件）：跳过，绝不清理其前端
+            continue
+        src_names = {i.name for i in src_fe.iterdir()}
         for item in dst_fe.iterdir():
             if item.is_file() and item.suffix == ".js" and item.name not in src_names:
                 try:
@@ -122,7 +131,8 @@ def _check_password_reset():
         cfg["auth"]["totp_enabled"] = False
         cfg["auth"]["totp_secret"] = ""
         save_user_config(cfg)
-        logger.info("检测到 password_plain，已重置密码并退出，请移除该字段后重新启动")
+        # 审查修复：password_plain 已自动删除（渲染不再写回空行），退出后再次启动即可用新密码登录
+        logger.info("检测到 password_plain，已重置密码并自动删除该字段；进程退出，请重新启动后用新密码登录")
         raise SystemExit(0)
 
 
@@ -145,6 +155,14 @@ def create_app() -> FastAPI:
             raise
         # 重新初始化日志（提取资源后路径可能变化）
         setup_logger()
+        # 按保留天数自动清理过期审计日志（logging.audit_log_retention_days，0/负数=关闭）
+        try:
+            from core.audit import cleanup_audit_by_retention
+            _removed = cleanup_audit_by_retention()
+            if _removed:
+                logger.info("已按保留天数自动清理 %d 个过期审计日志文件", _removed)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("审计日志自动清理跳过：%s", exc)
         # 加载插件并挂载路由
         pm = get_plugin_manager()
         pm.load_all()
@@ -160,19 +178,27 @@ def create_app() -> FastAPI:
         yield
         # ---- 关闭：插件清理（幂等，失败不阻断退出）----
         try:
-            for entry in list(pm.plugins.values()):
+            for name, entry in list(pm.plugins.items()):
                 inst = entry.get("instance") if isinstance(entry, dict) else None
                 if inst is not None and hasattr(inst, "on_unload"):
                     try:
                         inst.on_unload()
-                    except Exception:  # noqa: BLE001
-                        pass
-        except Exception:  # noqa: BLE001
-            pass
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("插件 %s on_unload 异常（忽略）：%s", name, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("插件卸载遍历异常（忽略）：%s", exc)
         logger.info("NetCore Framework 已停止")
 
     # 版本号单点维护于 core/config_loader.SYSTEM_VERSION，避免两处硬编码不同步
-    app = FastAPI(title="NetCore Framework", version=SYSTEM_VERSION, lifespan=lifespan)
+    # 审查报告 #2：Swagger 默认关闭，仅当 user_config.security.enable_docs=true 时开启
+    from core.config_loader import get_user_config
+    _docs_on = bool(get_user_config().get("security", {}).get("enable_docs", False))
+    app = FastAPI(
+        title="NetCore Framework", version=SYSTEM_VERSION, lifespan=lifespan,
+        docs_url="/docs" if _docs_on else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if _docs_on else None,
+    )
 
     # ---- 中间件：审计客户端 IP + IP 黑白名单 ----
     @app.middleware("http")
@@ -180,10 +206,12 @@ def create_app() -> FastAPI:
         client_ip = request.client.host if request.client else "127.0.0.1"
         ctx_client_ip.set(client_ip)
         path = request.url.path
-        # 放行登录相关与静态资源，避免白名单误锁
+        # 审查修复：从放行名单移除 /api/auth/login——此前被拉黑的 IP 仍可对该端点
+        # 无限速试密码，封禁机制在暴力破解最关键的位置失效。回环地址已在白名单
+        # （bootstrap 自动写入），本机管理通道不受影响；静态资源与 crypto-key/
+        # health 保持放行（黑名单对静态文件无安全意义）。
         skip = any(path.startswith(p) for p in (
-            "/assets", "/api/system/crypto-key", "/api/auth/login",
-            "/api/system/health", "/docs", "/openapi.json",
+            "/assets", "/api/system/crypto-key", "/api/system/health",
         ))
         if not skip:
             # check_ip 只会返回 ("allow", None) 或 ("deny_blacklist", 404)：
@@ -205,6 +233,17 @@ def create_app() -> FastAPI:
             logger.debug("HTTP %s %s -> 异常 (%.0fms)", request.method, path,
                          (time.time() - _t0) * 1000)
             raise
+
+    # 中间件：安全响应头（审查修复：此前完全缺失）。
+    # 不加 CSP——前端使用 v-html/内联模板，贸然收紧 script-src 有破坏页面风险，
+    # 待前端改造后再评估；基础三件套零成本且不影响现有功能。
+    @app.middleware("http")
+    async def security_headers_middleware(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response
 
     # 中间件：运维常用工具箱(opstoolbox) 禁止浏览器缓存任何信息----
     @app.middleware("http")
@@ -229,8 +268,8 @@ def create_app() -> FastAPI:
     # ---- 前端静态资源 ----
     if FRONTEND_DIR.exists():
         app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="assets")
-    if WIKI_DIR.exists():
-        app.mount("/wiki", StaticFiles(directory=str(WIKI_DIR)), name="wiki")
+    # 审查报告 #1：删除 /wiki 静态挂载，避免绕过插件鉴权匿名拉取内部文档。
+    # 文档内容只走已鉴权的 /api/wiki/doc/{name} 接口。
 
     if PLUGINS_DIR.exists():
         for _p in PLUGINS_DIR.iterdir():
@@ -244,7 +283,7 @@ def create_app() -> FastAPI:
 
     # ---- SPA 入口与兜底路由 ----
     @app.get("/api/plugins/frontend-manifest")
-    async def frontend_manifest():
+    async def frontend_manifest(_: str = Depends(get_current_user)):
         """返回所有插件 frontend/ 下的 JS 文件清单，供前端动态注入<script>。
 
         契约（见 wiki/05-插件开发指南.md）：
@@ -285,6 +324,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(404)
     async def _not_found_handler(request: Request, exc):
         path = request.url.path
+        # 审查报告 #14：含扩展名的路径（如 /favicon.ico）返回 JSON 404，不走 SPA 回退
+        last_seg = path.rsplit("/", 1)[-1]
+        if "." in last_seg:
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
         # 仅对真正的 API / 静态资源路径返回 JSON 404；
         # /wiki/view/* 是前端 SPA 路由，应走 index.html 回退。
         if path.startswith(("/api", "/assets", "/docs", "/openapi.json")) or (

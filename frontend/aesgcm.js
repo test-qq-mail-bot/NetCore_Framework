@@ -9,8 +9,9 @@
  *
  * 该实现用于会话级凭证加密，属“纵深防御”性质，不能替代 HTTPS。
  * 密钥说明（原注释“后端每次随机生成且仅存于内存”与实现不符，已更正）：
- *   密钥仅在首次生成 config/core.yaml 时随机产生一次，之后长期持久化在
- *   crypto.encryption_key 中，并由公开接口 /api/system/crypto-key 下发给前端。
+ *   后端以 config/core.yaml 的 crypto.encryption_key（主密钥）为根，
+ *   经 HMAC-SHA256 派生出独立的「传输子密钥」，由公开接口 /api/system/crypto-key
+ *   下发（审查修复：不再直接下发主密钥，防止其被用于解密落盘敏感字段）。
  */
 (function (global) {
     "use strict";

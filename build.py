@@ -254,6 +254,15 @@ def final_artifact_name():
     return "netcore-framework.exe" if is_windows_host() else "netcore-framework"
 
 
+def sha256_of(path):
+    """审查报告 #19：产物哈希由 MD5 升级为 SHA-256（更强抗碰撞）。"""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def md5_of(path):
     h = hashlib.md5()
     with open(path, "rb") as f:
@@ -317,6 +326,7 @@ def _report(path):
     print(f"[完成] 产物：{path}")
     print(f"       体积：{size} 字节（≈{size / 1024 / 1024:.1f} MB）")
     print(f"       MD5 ：{md5_of(path)}")
+    print(f"       SHA256：{sha256_of(path)}")
     print(f"       时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("------------------------------------------------------------")
 

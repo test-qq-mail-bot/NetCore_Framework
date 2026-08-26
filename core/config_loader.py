@@ -5,6 +5,9 @@ config_loader.py - 全局配置加载模块
 若配置文件不存在则自动生成默认配置
 程序首次运行时会自动创建所需目录结构
 """
+import base64
+import hashlib
+import hmac
 import os
 import sys
 import threading
@@ -13,6 +16,48 @@ from pathlib import Path
 import yaml
 
 from core.crypto_utils import CryptoUtils
+
+
+# ------------------------------------------------------------------
+# 原子写入 + 并发保护（审查报告 #4 修复）
+# ------------------------------------------------------------------
+_cfg_locks = {
+    "user": threading.RLock(),
+    "security": threading.RLock(),
+    "notify": threading.RLock(),
+}
+
+
+def _atomic_write_text(path: Path, text: str):
+    """原子写入文本文件：先写临时文件再 os.replace，避免断电/崩溃留下半截文件。"""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)      # 同盘原子操作
+
+
+def _restrict_file_perms(path: Path):
+    """收紧敏感文件权限（审查报告 #5）。
+
+    POSIX: chmod 0o600（仅文件属主可读写）；
+    Windows: best-effort 用 icacls 收紧到当前用户（失败仅告警不影响启动）。
+    """
+    try:
+        if os.name == "posix":
+            os.chmod(path, 0o600)
+        elif os.name == "nt":
+            import subprocess
+            username = os.environ.get("USERNAME", "")
+            if username:
+                subprocess.run(
+                    ["icacls", str(path), "/inheritance:r", "/grant:r", "%s:F" % username],
+                    capture_output=True, timeout=5,
+                )
+    except Exception as exc:
+        try:
+            from core.logger import get_logger
+            get_logger().warning("收紧文件权限失败（%s）：%s", path, exc)
+        except Exception:  # noqa: BLE001
+            pass
 
 # ------------------------------------------------------------------
 # 程序根目录（配置文件与数据文件均存放于此）
@@ -39,7 +84,7 @@ SYSTEM_NAME = "NetCore Framework"
 # 不再依赖手工同步的全局版本号）
 # core.yaml 恢复中文注释（文本级迁移，logging/session/https/debug 迁 user_config
 # 且不留「迁移自」标注）、log-level 落盘、审计记录配置修改前后差异、EXE 版本资源、
-SYSTEM_VERSION = "20260824-V2"
+SYSTEM_VERSION = "20260826-V3"
 
 # 全局配置缓存
 _config_cache = {}
@@ -49,33 +94,10 @@ _config_cache_lock = threading.Lock()
 
 # ------------------------------------------------------------------
 # 默认配置文件内容（含中文注释，首次启动时写入磁盘）
+# 审查清理：移除无引用的 DEFAULT_USER_CONFIG 字符串常量——user_config.yaml
+# 实际由 _write_default_configs 中的字典 + _render_user_config_commented 生成，
+# 模板字符串是历史遗留死代码，且与真实渲染产物不同步，易误导维护者。
 # ------------------------------------------------------------------
-DEFAULT_USER_CONFIG = """\
-# ============================================================
-# 用户配置文件（可读写）
-# 此文件由框架自动维护，手工修改时请遵循格式规范
-# 修改插件启用列表后，可通过 Web 后台热重启生效
-# ============================================================
-
-# ---------- 系统信息（可选） ----------
-system:
-  name: ""                # 自定义软件名称（空则使用内置默认值）
-  version: ""             # 自定义版本号（空则使用内置默认值）
-
-# ---------- 认证相关 ----------
-auth:
-  username: "admin"       # 管理员用户名（固定为 admin，暂不支持多用户）
-  password_hash: ""       # 密码哈希（PBKDF2-SHA256），首次启动自动生成
-  totp_enabled: false     # TOTP 双因素认证开关
-  totp_secret: ""         # TOTP 密钥（Base32，绑定时自动写入，加密存储）
-  last_login_time: ""     # 上次登录时间（ISO 8601）
-  last_login_ip: ""       # 上次登录 IP
-
-# ---------- 插件配置 ----------
-plugins:
-  detected: []            # 每次启动自动重新扫描 plugins/ 目录并写入「所有检测到的插件」（仅作记录，不参与启停判定）
-  disabled: []            # 关闭列表：为空表示启用全部已发现插件（wiki 插件默认启用）；将插件名加入此列表即可停用该插件
-"""
 
 DEFAULT_SECURITY_CONFIG = """\
 # ============================================================
@@ -279,9 +301,8 @@ def _write_default_configs():
     if not (CONFIG_DIR / "core.yaml").exists():
         enc_key = CryptoUtils.generate_key()
         jwt_secret = CryptoUtils.generate_key()
-        (CONFIG_DIR / "core.yaml").write_text(
-            _default_core_yaml(enc_key, jwt_secret), encoding="utf-8"
-        )
+        _atomic_write_text(CONFIG_DIR / "core.yaml", _default_core_yaml(enc_key, jwt_secret))
+        _restrict_file_perms(CONFIG_DIR / "core.yaml")
     if not (CONFIG_DIR / "user_config.yaml").exists():
         # 直接构造完整配置字典并用带注释的渲染器写出，彻底避免「模板字符串替换」因
         # 缩进/空格/正则匹配失败导致默认密码哈希或 detected 未写入的历史隐患。
@@ -333,10 +354,14 @@ def _write_default_configs():
                 "redirect_port": "",
                 "domain": "",
             },
+            # 审查报告 #2/#3：安全相关开关
+            "security": {
+                "enable_docs": False,           # Swagger 文档默认关闭，调试时改 true
+                "trusted_proxies": ["127.0.0.1", "::1"],  # 反向代理可信对端 IP，仅这些 IP 的 X-Forwarded-For 会被信任
+            },
         }
-        (CONFIG_DIR / "user_config.yaml").write_text(
-            _render_user_config_commented(default_user_cfg), encoding="utf-8"
-        )
+        _atomic_write_text(CONFIG_DIR / "user_config.yaml", _render_user_config_commented(default_user_cfg))
+        _restrict_file_perms(CONFIG_DIR / "user_config.yaml")
     if not (CONFIG_DIR / "security.yaml").exists():
         (CONFIG_DIR / "security.yaml").write_text(DEFAULT_SECURITY_CONFIG, encoding="utf-8")
     if not (CONFIG_DIR / "notify.yaml").exists():
@@ -502,10 +527,21 @@ def _ensure_user_config_defaults():
         if "domain" not in _h:
             _h["domain"] = ""
             changed = True
+    # 审查报告 #2/#3：补齐 security 段（enable_docs / trusted_proxies）
+    if not isinstance(cfg.get("security"), dict):
+        cfg["security"] = {}
+        changed = True
+    _sec = cfg["security"]
+    if "enable_docs" not in _sec:
+        _sec["enable_docs"] = False
+        changed = True
+    if "trusted_proxies" not in _sec:
+        _sec["trusted_proxies"] = ["127.0.0.1", "::1"]
+        changed = True
     if not changed:
         return
     try:
-        p.write_text(_render_user_config_commented(cfg), encoding="utf-8")
+        _atomic_write_text(p, _render_user_config_commented(cfg))
         try:
             from core.logger import get_logger
             get_logger().info("user_config.yaml 已自动补齐/清理默认键（timezone/logging/notify/https；已移除 session/server.debug）")
@@ -515,6 +551,42 @@ def _ensure_user_config_defaults():
         try:
             from core.logger import get_logger
             get_logger().warning("自动补齐 user_config.yaml 默认键失败：%s", exc)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _ensure_loopback_whitelist():
+    """自动将回环地址写入 security.yaml 白名单（127.0.0.1 + ::1，永久有效）。
+
+    取消 security.py 中硬编码的回环放行后，改为由白名单统一管理。
+    每次启动检查：若白名单中不存在回环条目则自动补齐，已存在则跳过。
+    """
+    try:
+        from core.security import _entry_ip
+        p = CONFIG_DIR / "security.yaml"
+        if not p.exists():
+            return
+        cfg = _read_yaml(p) or {}
+        wl = cfg.get("whitelist") or []
+        loopback_ips = {"127.0.0.1", "::1"}
+        existing = {_entry_ip(e) for e in wl}
+        added = False
+        for ip in loopback_ips:
+            if ip not in existing:
+                wl.append({"ip": ip, "note": "系统初始化-本地管理通道", "expires_at": None})
+                added = True
+        if added:
+            cfg["whitelist"] = wl
+            _atomic_write_text(p, _render_security_config_commented(cfg))
+            try:
+                from core.logger import get_logger
+                get_logger().info("已自动将回环地址（127.0.0.1 + ::1）写入白名单")
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception as exc:
+        try:
+            from core.logger import get_logger
+            get_logger().warning("自动补齐回环白名单失败：%s", exc)
         except Exception:  # noqa: BLE001
             pass
 
@@ -663,6 +735,7 @@ def bootstrap():
     refresh_detected_plugins()   # 每次启动重新扫描插件目录，更新 detected 列表
     _migrate_legacy_core_sections()  # 旧 core.yaml 遗留 logging/notify/session/https/debug 迁移（保留注释）
     _ensure_user_config_defaults()  # 自动补齐缺失默认键（timezone/logging/notify/session/https/debug）
+    _ensure_loopback_whitelist()    # 自动将回环地址写入白名单（127.0.0.1 + ::1，永久有效）
     _recomment_existing_configs()
     _config_cache.clear()
 
@@ -675,11 +748,6 @@ def _read_yaml(path: Path) -> dict:
         return {}
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
-
-
-def _write_yaml(path: Path, data: dict):
-    with open(path, "w", encoding="utf-8") as handle:
-        yaml.safe_dump(data, handle, allow_unicode=True, sort_keys=False)
 
 
 def _yaml_scalar_str(v) -> str:
@@ -753,11 +821,33 @@ def _render_user_config_commented(cfg: dict) -> str:
     L.append("  auto_update_timezone: " + auto_update_timezone + "  # 登录自动更新时区：true=每次登录用浏览器时区自动覆盖上面的 timezone；false=固定用上面的 timezone")
     L.append("")
     L.append("# ---------- 认证相关 ----------")
+    L.append("# 【如何修改登录密码】")
+    L.append("#   Web 端无改密入口，修改密码的唯一途径：在本段手动添加 auth.password_plain 并填入新密码 → 保存本文件 → 重启 EXE。")
+    L.append("#     框架启动时检测到该字段会自动完成密码重置（PBKDF2-SHA256 写入 password_hash，同时重置 TOTP 双因素），")
+    L.append("#     随后进程自动退出，password_plain 行已被自动删除；再次启动即可用新密码登录。")
+    L.append("# 注意：")
+    L.append("#   - 修改密码：在下方 auth 段手动添加 password_plain 并填入新密码 → 保存本文件 → 重启 EXE，")
+    L.append("#     启动时自动将密码重置为 PBKDF2-SHA256 哈希并删除该行后退出，再次启动即可用新密码登录（详见上方说明）；")
+    L.append("#   - username 固定为 admin，暂不支持修改用户名 / 多用户；")
+    L.append("#   - password_hash 为 PBKDF2-SHA256 哈希（非明文），请勿手工填写，格式错误将导致无法登录；")
+    L.append("#   - 默认密码 Admin@123!，立即修改。")
     L.append("auth:")
     L.append("  username: " + username + "       # 管理员用户名（固定为 admin，暂不支持多用户）")
+    # 审查修复：password_plain 仅在「用户手动添加改密请求」时出现在文件中，
+    # 重置完成后由 _check_password_reset 删除，不再无条件输出空行
+    _pp = auth.get("password_plain")
+    if _pp:
+        L.append("  password_plain: " + _yaml_scalar_str(_pp) +
+                 "   # 明文改密入口：保存并重启 EXE 即完成重置（重置后本行自动删除）")
     L.append("  password_hash: " + password_hash + "       # 密码哈希（PBKDF2-SHA256），首次启动自动生成")
     L.append("  totp_enabled: " + totp_enabled + "     # TOTP 双因素认证开关")
     L.append("  totp_secret: " + totp_secret + "         # TOTP 密钥（Base32，绑定时自动写入，加密存储）")
+    # 审查修复：渲染器此前不输出 pending_totp_secret，导致「绑定待确认密钥」
+    # 在任何一次配置保存后从文件中消失（进程内缓存掩盖了问题，重启后绑定流程断裂）
+    _pending_totp = auth.get("pending_totp_secret")
+    if _pending_totp:
+        L.append("  pending_totp_secret: " + _yaml_scalar_str(_pending_totp) +
+                 "  # TOTP 绑定待确认密钥（加密存储，验证成功后自动删除）")
     L.append("  last_login_time: " + last_login_time + " # 上次登录时间（ISO 8601）")
     L.append("  last_login_ip: " + last_login_ip + " # 上次登录 IP")
     L.append("")
@@ -774,8 +864,8 @@ def _render_user_config_commented(cfg: dict) -> str:
     L.append("  file: " + log_file + "  # 仅作路径说明：实际按天命名为 data/logs/YYYYMMDD-netcore.log")
     L.append("  max_bytes: " + str(log_max_bytes) + "      # 单文件最大字节数（10MB）")
     L.append("  backup_count: " + str(log_backup) + "         # 保留最近日志文件个数")
-    L.append("  audit_log_retention_days: " + str(log_retention) + "   # 审计日志保留天数（预留项：当前框架未做自动过期清理，")
-    L.append("                                 # 审计日志需通过「日志中心-清理」手动清除，见 core.audit.clean_audit）")
+    L.append("  audit_log_retention_days: " + str(log_retention) + "   # 审计日志保留天数（启动时自动删除超期日志文件；")
+    L.append("                                 # 0 或负数=关闭自动清理；「日志中心-清理」仍可手动全清）")
     L.append("")
     L.append("# ---------- 通知频率限制 ----------")
     L.append("notify:")
@@ -794,6 +884,19 @@ def _render_user_config_commented(cfg: dict) -> str:
     L.append("  auto_redirect: " + https_auto_redirect + "   # 自动转跳：启用 HTTPS 后误用 http 访问自动跳转 https；反之亦然（需重启生效）")
     L.append("  redirect_port: " + https_redirect_port + "   # 反向协议跳转监听端口（空=自动取主端口+1；可填具体端口）")
     L.append("  domain: " + https_domain + "   # HTTPS 证书 SAN 显式地址：留空=本机所有非回环网卡 IP；可填 IP 或域名，多个用逗号分隔（如 192.168.1.100,example.com），重启后生效")
+    L.append("")
+    # ---------- 安全开关（审查报告 #2/#3） ----------
+    _sec = cfg.get("security", {}) or {}
+    _enable_docs = _yaml_scalar_str(_sec.get("enable_docs", False))
+    _trusted_proxies = _sec.get("trusted_proxies", ["127.0.0.1", "::1"]) or []
+    L.append("# ---------- 安全开关 ----------")
+    L.append("# enable_docs: Swagger/OpenAPI 文档是否开放（true=开放 /docs 和 /openapi.json；false=默认关闭，仅调试时开启）")
+    L.append("# trusted_proxies: 反向代理可信对端 IP 列表，仅这些 IP 的 X-Forwarded-For 头会被信任（部署在 nginx 等反代后时需配置代理 IP）")
+    L.append("security:")
+    L.append("  enable_docs: " + _enable_docs)
+    # 审查修复：IPv6（::1）在 YAML flow 序列中必须加引号，否则 ':' 导致解析失败
+    tp_str = ", ".join('"%s"' % str(x) for x in _trusted_proxies) if _trusted_proxies else ""
+    L.append("  trusted_proxies: [" + tp_str + "]")
     L.append("")
     L.append("# 说明：日志等级统一由上方 logging.level 控制（DEBUG/INFO/WARNING/ERROR）；")
     L.append("# 自动退出登录时间统一由上方 system.auto_logout_minutes 控制（0=关闭）。")
@@ -980,40 +1083,111 @@ def get_user_config() -> dict:
 
 
 def get_security_config() -> dict:
-    """读取安全配置（带缓存）"""
+    """读取安全配置（带缓存，双重检查锁）"""
     if "security" not in _config_cache:
-        _config_cache["security"] = _read_yaml(CONFIG_DIR / "security.yaml")
-    return _config_cache["security"]
+        with _config_cache_lock:
+            if "security" not in _config_cache:
+                data = _read_yaml(CONFIG_DIR / "security.yaml")
+                if data:
+                    _config_cache["security"] = data
+    return _config_cache.get("security", {})
 
 
 def get_notify_config() -> dict:
-    """读取通知配置（带缓存）"""
+    """读取通知配置（带缓存，双重检查锁）"""
     if "notify" not in _config_cache:
-        _config_cache["notify"] = _read_yaml(CONFIG_DIR / "notify.yaml")
-    return _config_cache["notify"]
+        with _config_cache_lock:
+            if "notify" not in _config_cache:
+                data = _read_yaml(CONFIG_DIR / "notify.yaml")
+                if data:
+                    _config_cache["notify"] = data
+    return _config_cache.get("notify", {})
+
+
+def _restrict_if_https_key_present(cfg: dict):
+    """配置中存有 HTTPS 私钥（key_content）时，每次保存后重新收紧文件权限。
+
+    审查修复：此前 _restrict_file_perms 仅在首次创建 user_config.yaml 时执行，
+    后续上传证书/私钥重写文件后权限不再保证。icacls 开销可接受（仅含私钥时触发）。
+    """
+    try:
+        https = cfg.get("https") if isinstance(cfg.get("https"), dict) else {}
+        if https.get("key_content"):
+            _restrict_file_perms(CONFIG_DIR / "user_config.yaml")
+    except Exception as exc:
+        try:
+            from core.logger import get_logger
+            get_logger().debug("收紧 user_config.yaml 权限失败：%s", exc)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def save_user_config(cfg: dict):
-    """保存用户配置并刷新缓存（保留中文注释）"""
-    (CONFIG_DIR / "user_config.yaml").write_text(_render_user_config_commented(cfg), encoding="utf-8")
-    _config_cache["user"] = cfg
+    """保存用户配置并刷新缓存（保留中文注释，原子写入+并发保护）"""
+    with _cfg_locks["user"]:
+        _atomic_write_text(CONFIG_DIR / "user_config.yaml", _render_user_config_commented(cfg))
+        _config_cache["user"] = cfg
+    _restrict_if_https_key_present(cfg)
+
+
+def update_user_config(mutator) -> dict:
+    """审查报告 #4：受锁保护的读-改-写统一入口。
+
+    以磁盘为准读取（避免缓存漂移），执行 mutator 修改，原子写回并刷新缓存。
+    返回更新后的配置。散落的 get→改→save 序列应逐步收敛到本函数，避免并发丢更新。
+    """
+    with _cfg_locks["user"]:
+        cfg = _read_yaml(CONFIG_DIR / "user_config.yaml") or {}
+        mutator(cfg)
+        _atomic_write_text(CONFIG_DIR / "user_config.yaml", _render_user_config_commented(cfg))
+        _config_cache["user"] = cfg
+    _restrict_if_https_key_present(cfg)
+    return cfg
 
 
 def save_security_config(cfg: dict):
-    """保存安全配置并刷新缓存（保留中文注释）"""
-    (CONFIG_DIR / "security.yaml").write_text(_render_security_config_commented(cfg), encoding="utf-8")
-    _config_cache["security"] = cfg
+    """保存安全配置并刷新缓存（保留中文注释，原子写入+并发保护）"""
+    with _cfg_locks["security"]:
+        _atomic_write_text(CONFIG_DIR / "security.yaml", _render_security_config_commented(cfg))
+        _config_cache["security"] = cfg
 
 
 def save_notify_config(cfg: dict):
-    """保存通知配置并刷新缓存（保留中文注释， 修复注释丢失）"""
-    (CONFIG_DIR / "notify.yaml").write_text(_render_notify_config_commented(cfg), encoding="utf-8")
-    _config_cache["notify"] = cfg
+    """保存通知配置并刷新缓存（保留中文注释，原子写入+并发保护）"""
+    with _cfg_locks["notify"]:
+        _atomic_write_text(CONFIG_DIR / "notify.yaml", _render_notify_config_commented(cfg))
+        _config_cache["notify"] = cfg
 
 
 def get_encryption_key() -> str:
     """获取 AES-256-GCM 加密密钥"""
     return get_core_config().get("crypto", {}).get("encryption_key", "")
+
+
+# 传输派生密钥进程内缓存（主密钥运行期不变，派生值亦不变）
+_transport_key_cache = None
+
+
+def get_transport_encryption_key() -> str:
+    """返回「传输加密」派生密钥（Base64，32 字节）。
+
+    审查修复：登录前端必须先于登录拿到密钥才能加密凭证，因此该密钥只能经
+    无鉴权接口 /api/system/crypto-key 下发——等于公开信息。此前直接下发静态
+    主密钥 crypto.encryption_key，而该主密钥同时用于加密**落盘**的 TOTP secret
+    与通知渠道密码/Webhook，任何能访问端口的人拿到它即可离线解密全部密文。
+
+    现改为 HMAC-SHA256(主密钥, "netcore-transport-v1") 派生出独立传输子密钥：
+      - 下发的仅是子密钥，泄露后无法解密任何落盘密文（主密钥永不出配置文件）；
+      - 前端登录加密与 auth.decrypt_field 使用同一子密钥，协议与报文格式不变；
+      - 兼容期：decrypt_field 会先试子密钥、再回落主密钥（旧缓存页面的请求）。
+    """
+    global _transport_key_cache
+    if _transport_key_cache:
+        return _transport_key_cache
+    master_raw = base64.b64decode(get_encryption_key())
+    digest = hmac.new(master_raw, b"netcore-transport-v1", hashlib.sha256).digest()
+    _transport_key_cache = base64.b64encode(digest).decode("utf-8")
+    return _transport_key_cache
 
 
 def get_system_info() -> dict:

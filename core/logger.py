@@ -189,10 +189,3 @@ def set_level(level_name: str):
 def get_level() -> str:
     """返回当前日志级别名（Web 界面读取，用于前端 DEBUG 输出联动）。"""
     return logging.getLevelName(get_logger().level)
-
-
-def get_handlers() -> tuple:
-    """返回 (file_handler, console_handler) 实例，
-    供 main.py 构造 uvicorn 日志配置时直接引用，使 uvicorn 的 HTTP 访问日志
-    与 netcore 共用同一份文件与控制台（级别随 set_level 联动）。"""
-    return _file_handler, _console_handler

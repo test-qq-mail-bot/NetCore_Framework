@@ -8,12 +8,14 @@ import csv
 import io
 import os
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.audit import audit_log, clean_audit, query_audit
 from core.auth import (
@@ -27,9 +29,11 @@ from core.config_loader import (
     get_core_config,
     get_security_config,
     get_system_info,
+    get_transport_encryption_key,
     get_user_config,
     save_security_config,
 )
+from core.crypto_utils import CryptoUtils
 from core.logger import get_logger, set_level, get_level
 from core.notify import get_notify_manager
 from core.plugin_manager import get_plugin_manager
@@ -68,6 +72,25 @@ class TotpVerifyRequest(BaseModel):
     secret: str = ""
 
 
+# 默认密码判定结果按 password_hash 缓存：PBKDF2 校验一次约数百毫秒，
+# 此前每次成功登录都重算一遍（纯浪费，哈希不变结果不变）。
+_default_pw_cache: dict = {}
+_default_pw_lock = threading.Lock()
+
+
+def _is_default_password(password_hash: str) -> bool:
+    """判断当前密码哈希是否对应默认密码 Admin@123!（供前端改密提示）。"""
+    if not password_hash:
+        return False
+    with _default_pw_lock:
+        cached = _default_pw_cache.get(password_hash)
+    if cached is None:
+        cached = CryptoUtils.verify_password("Admin@123!", password_hash)
+        with _default_pw_lock:
+            _default_pw_cache[password_hash] = cached
+    return cached
+
+
 @router_auth.post("/auth/login")
 async def auth_login(req: LoginRequest, request: Request):
     from core.auth import decrypt_field
@@ -80,7 +103,9 @@ async def auth_login(req: LoginRequest, request: Request):
     password = decrypt_field(req.password)
     totp = decrypt_field(req.totp) if req.totp else None
 
-    result = authenticate(username, password, totp)
+    # 审查修复：authenticate 内含 PBKDF2（600k 迭代，数百毫秒 CPU），此前在事件
+    # 循环内同步执行，并发登录会卡住整个服务。转线程池执行。
+    result = await asyncio.to_thread(authenticate, username, password, totp)
     if not result["success"]:
         # 记录失败策略
         sec = get_security_manager()
@@ -90,9 +115,9 @@ async def auth_login(req: LoginRequest, request: Request):
         return {"success": False, "message": result["message"], "totp_required": result.get("totp_required", False)}
     get_security_manager().reset_failures(client_ip)
     get_session_manager().create(result["token"])
-    # 是否为默认密码（用于前端提示）
-    from core.crypto_utils import CryptoUtils
-    is_default = CryptoUtils.verify_password("Admin@123!", get_user_config().get("auth", {}).get("password_hash", ""))
+    # 是否为默认密码（用于前端提示；带缓存 + 线程池，见 _is_default_password）
+    is_default = await asyncio.to_thread(
+        _is_default_password, get_user_config().get("auth", {}).get("password_hash", ""))
     return {
         "success": True,
         "token": result["token"],
@@ -137,28 +162,49 @@ async def auth_heartbeat(request: Request, _: str = Depends(get_current_user)):
 # ==================================================================
 # 安全
 # ==================================================================
+class WhitelistItem(BaseModel):
+    ip: str
+    note: str = ""
+    expires_at: str = None
+
+
+class BlacklistItem(BaseModel):
+    ip: str
+    # 审查修复：此前 minutes 由裸 int(item.get("minutes") or 0) 解析，
+    # 非法输入直接 500；交由 Pydantic 统一校验（负数/非整数 → 422）
+    minutes: int = Field(default=0, ge=0, le=1000000)
+    note: str = ""
+    expires_at: str = None
+
+
+class FailurePolicyRequest(BaseModel):
+    """登录失败策略（审查修复：此前接受任意 dict 整体覆盖 failure_policy，
+    塞入非法值后 record_failure 比较时抛 TypeError 导致登录链路 500）。"""
+    max_failures: int = Field(default=5, ge=1, le=10000)
+    block_minutes: int = Field(default=10, ge=0, le=1000000)
+    reset_interval_minutes: int = Field(default=30, ge=0, le=1000000)
+
+
 @router_security.get("/security/whitelist")
 async def sec_get_whitelist(_: str = Depends(get_current_user)):
     return get_security_config().get("whitelist", [])
 
 
 @router_security.post("/security/whitelist")
-async def sec_add_whitelist(item: dict, _: str = Depends(get_current_user)):
-    ip = item.get("ip")
-    if not ip:
+async def sec_add_whitelist(item: WhitelistItem, _: str = Depends(get_current_user)):
+    if not item.ip.strip():
         return JSONResponse(status_code=400, content={"success": False, "message": "缺少 ip"})
     try:
         get_security_manager().add_whitelist(
-            ip, note=item.get("note", ""), expires_at=item.get("expires_at"))
+            item.ip.strip(), note=item.note, expires_at=item.expires_at)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
-    audit_log("security_policy_changed", "添加白名单:%s" % ip, "success")
+    audit_log("security_policy_changed", "添加白名单:%s" % item.ip, "success")
     return {"success": True}
 
 
 @router_security.delete("/security/whitelist")
-async def sec_del_whitelist(item: dict, _: str = Depends(get_current_user)):
-    ip = item.get("ip")
+async def sec_del_whitelist(ip: str = Query(...), _: str = Depends(get_current_user)):
     get_security_manager().remove_whitelist(ip)
     audit_log("security_policy_changed", "删除白名单:%s" % ip, "success")
     return {"success": True}
@@ -170,24 +216,21 @@ async def sec_get_blacklist(_: str = Depends(get_current_user)):
 
 
 @router_security.post("/security/blacklist")
-async def sec_add_blacklist(item: dict, _: str = Depends(get_current_user)):
-    ip = item.get("ip")
-    if not ip:
+async def sec_add_blacklist(item: BlacklistItem, _: str = Depends(get_current_user)):
+    if not item.ip.strip():
         return JSONResponse(status_code=400, content={"success": False, "message": "缺少 ip"})
-    minutes = int(item.get("minutes") or 0)
     try:
         get_security_manager().add_blacklist(
-            ip, minutes, "手动添加",
-            note=item.get("note", ""), expires_at=item.get("expires_at"))
+            item.ip.strip(), item.minutes, "手动添加",
+            note=item.note, expires_at=item.expires_at)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
-    audit_log("security_policy_changed", "添加黑名单:%s" % ip, "success")
+    audit_log("security_policy_changed", "添加黑名单:%s" % item.ip, "success")
     return {"success": True}
 
 
 @router_security.delete("/security/blacklist")
-async def sec_del_blacklist(item: dict, _: str = Depends(get_current_user)):
-    ip = item.get("ip")
+async def sec_del_blacklist(ip: str = Query(...), _: str = Depends(get_current_user)):
     get_security_manager().remove_blacklist(ip)
     audit_log("security_policy_changed", "删除黑名单:%s" % ip, "success")
     return {"success": True}
@@ -199,8 +242,8 @@ async def sec_get_policy(_: str = Depends(get_current_user)):
 
 
 @router_security.put("/security/failure-policy")
-async def sec_put_policy(item: dict, _: str = Depends(get_current_user)):
-    get_security_manager().update_failure_policy(item)
+async def sec_put_policy(req: FailurePolicyRequest, _: str = Depends(get_current_user)):
+    get_security_manager().update_failure_policy(req.model_dump())
     audit_log("security_policy_changed", "更新失败策略", "success")
     return {"success": True}
 
@@ -267,10 +310,13 @@ async def audit_query(
     filter_values: List[str] = Query(None),
     _: str = Depends(get_current_user),
 ):
-    records, total = query_audit(page=page, size=size, ip=ip, result=result,
-                                 action=action, start_date=start_date, end_date=end_date,
-                                 sort_by=sort_by, sort_order=sort_order,
-                                 filter_col=filter_col, filter_values=filter_values)
+    # 审查修复：query_audit 为全量文件 IO + 内存扫描，此前在事件循环内同步执行，
+    # 大日志量时会卡住整个服务。转线程池执行。
+    records, total = await asyncio.to_thread(
+        query_audit, page=page, size=size, ip=ip, result=result,
+        action=action, start_date=start_date, end_date=end_date,
+        sort_by=sort_by, sort_order=sort_order,
+        filter_col=filter_col, filter_values=filter_values)
     return {"records": records, "total": total, "page": page, "size": size}
 
 
@@ -333,11 +379,18 @@ async def audit_export(
             buffer.truncate(0)
             return data
 
+        # 审查报告 #10：CSV 公式注入消毒——以 = + - @ 开头的单元格前置单引号
+        def _csv_safe(v):
+            if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+                return "'" + v
+            return v
+
         writer.writerow(["timestamp_utc", "ip", "username", "action", "result", "detail"])
         yield flush()
         for rec in records:
-            writer.writerow([rec.get("timestamp_utc"), rec.get("ip"), rec.get("username"),
-                             rec.get("action"), rec.get("result"), rec.get("detail")])
+            writer.writerow([_csv_safe(rec.get("timestamp_utc")), _csv_safe(rec.get("ip")),
+                             _csv_safe(rec.get("username")), _csv_safe(rec.get("action")),
+                             _csv_safe(rec.get("result")), _csv_safe(rec.get("detail"))])
             yield flush()
         if truncated:
             writer.writerow(["# 已截断：共 %d 条，本次仅导出 %d 条" % (total, returned),
@@ -359,15 +412,21 @@ async def audit_clean(_: str = Depends(get_current_user)):
 # ==================================================================
 @router_system.get("/system/crypto-key")
 async def system_crypto_key():
-    """返回加密密钥，供前端加密登录凭证（AES-256-GCM）；
+    """返回**传输派生密钥**（HMAC 派生子密钥），供前端加密登录凭证（AES-256-GCM）；
     同时返回软件名称、版本与 TOTP 开关（公开，供登录页前置展示软件名与 TOTP 输入框）。
     额外返回 builtin_name/builtin_version（**内置**软件名与版本号），
-    供浏览器控制台/前端启动日志核对程序新旧（不随用户自定义 name/version 变化）。"""
+    供浏览器控制台/前端启动日志核对程序新旧（不随用户自定义 name/version 变化）。
+
+    审查修复：本接口无鉴权（登录前必须能取钥），此前直接返回静态主密钥
+    crypto.encryption_key，而主密钥还保护落盘的 TOTP secret 与通知密码——等于
+    把保险柜密码贴在门口。现改为下发 HMAC 派生的独立传输子密钥（见
+    config_loader.get_transport_encryption_key），泄露后无法解密任何落盘密文。
+    """
     from core.config_loader import SYSTEM_NAME, SYSTEM_VERSION
     sys_info = get_system_info()
     totp_enabled = bool(get_user_config().get("auth", {}).get("totp_enabled", False))
     return {
-        "key": get_core_config().get("crypto", {}).get("encryption_key", ""),
+        "key": get_transport_encryption_key(),
         "name": sys_info["name"],
         "version": sys_info["version"],
         "builtin_name": SYSTEM_NAME,
@@ -540,6 +599,7 @@ async def basic_settings_put(req: BasicSettingsRequest, _: str = Depends(get_cur
     except Exception:  # noqa: BLE001
         audit_log("basic_settings_updated", "基础设置已保存", "success")
     save_user_config(cfg)
+    return {"success": True, "message": "基础设置已保存"}
 
 
 @router_system.post("/system/https/cert")
@@ -566,11 +626,22 @@ async def https_upload_cert(
     if not cname.endswith(cert_ok_ext) or not kname.endswith(key_ok_ext):
         return JSONResponse(status_code=400, content={"success": False,
                                                       "message": "证书仅支持 .crt/.pem，私钥仅支持 .key/.pem"})
+    # 审查修复：读取无大小上限，超大文件会占满内存。PEM 证书/私钥通常 <20KB，
+    # 取 256KB 上限已远超合理范围。优先在 read() 前用 starlette 的 size 元数据拦截
+    # （事后检查时内容早已进入内存）；size 缺失时退回读后二次校验。
+    _CERT_MAX_BYTES = 256 * 1024
+    if (cert_file.size is not None and cert_file.size > _CERT_MAX_BYTES) or \
+            (key_file.size is not None and key_file.size > _CERT_MAX_BYTES):
+        return JSONResponse(status_code=400, content={"success": False,
+                                                      "message": "证书/私钥文件过大（上限 256KB）"})
     cdata = await cert_file.read()
     kdata = await key_file.read()
     if not cdata or not kdata:
         return JSONResponse(status_code=400, content={"success": False,
                                                       "message": "上传内容为空"})
+    if len(cdata) > _CERT_MAX_BYTES or len(kdata) > _CERT_MAX_BYTES:
+        return JSONResponse(status_code=400, content={"success": False,
+                                                      "message": "证书/私钥文件过大（上限 256KB）"})
     try:
         save_uploaded_cert(cdata, kdata)
     except Exception as exc:  # noqa: BLE001
@@ -671,6 +742,10 @@ async def plugin_toggle(name: str, req: dict = None, _: str = Depends(get_curren
         current_disabled.add(name)
     cfg["plugins"]["disabled"] = sorted(current_disabled)
     save_user_config(cfg)
+    if not target:
+        # 审查修复：如实告知限制——Starlette 无法运行期摘除已挂载路由，
+        # 禁用插件后其 API 路由保留到下次重启（生命周期已随 load_all 卸载）。
+        logger.warning("插件 %s 已禁用：实例已卸载，但其 API 路由需重启服务后才会移除", name)
     try:
         await asyncio.to_thread(pm.load_all)
         # mount_routes 仅在启动 lifespan 执行一次。运行期启用插件后必须补挂路由，
@@ -703,7 +778,8 @@ async def plugins_reload_all(_: str = Depends(get_current_user)):
 
 @router_plugins.post("/system/plugins/reload-failed")
 async def plugins_reload_failed(_: str = Depends(get_current_user)):
-    return {"results": get_plugin_manager().reload_failed()}
+    # 审查修复：与 reload/reload-all 保持一致转线程池（含模块导入与 on_load，阻塞 loop）
+    return {"results": await asyncio.to_thread(get_plugin_manager().reload_failed)}
 
 
 # ==================================================================
@@ -735,5 +811,6 @@ def get_all_menus() -> list:
     return [dashboard] + plugin_menus + [system_group]
 
 
-# 启动时间（用于运行时长统计）
-START_TIME = __import__("time").time()
+# 启动时间（用于运行时长统计）。审查修复：改用常规导入，
+# 替换 `__import__("time").time()` hack 写法。
+START_TIME = time.time()

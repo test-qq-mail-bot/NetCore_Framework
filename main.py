@@ -61,7 +61,8 @@ def _make_asyncio_exception_handler():
         exc = context.get("exception")
         if exc is not None:
             name = type(exc).__name__
-            if name == "ConnectionResetError" or "ConnectionResetError" in str(exc):
+            # 审查报告 #13：收窄 ConnectionResetError 静默条件，仅静默 uvicorn 连接断开回调
+            if name == "ConnectionResetError" and "_call_connection_lost" in str(context.get("message", "")):
                 return  # 客户端主动断开，属正常现象，静默
         loop_.default_exception_handler(context)
     return _handler
@@ -91,8 +92,17 @@ def _run_redirect_server(host: str, port: int, main_scheme: str, main_port: int,
     from starlette.routing import Route
 
     async def _redirect(request):
+        import ipaddress
         host_header = request.headers.get("host", "")
         client_host = host_header.split(":")[0] if host_header else "127.0.0.1"
+        # 审查修复（原 #12 校验存在绕过）：Host 必须是 localhost 或合法 IP 字面量
+        # 才用于回跳；其余（任意域名等）一律回退 127.0.0.1。旧逻辑只拦含 / 或 \ 的
+        # 值，Host: evil.com 会 307 到攻击者域名，构成开放重定向。
+        if client_host not in ("localhost", "127.0.0.1", "::1"):
+            try:
+                ipaddress.ip_address(client_host)
+            except ValueError:
+                client_host = "127.0.0.1"
         target = "%s://%s:%d%s" % (main_scheme, client_host, main_port, request.url.path)
         if request.url.query_string:
             target += "?" + request.url.query_string.decode()
@@ -222,11 +232,22 @@ def main():
     logger.info("%s 启动中，内置版本 %s，监听 %s://%s:%d", SYSTEM_NAME, SYSTEM_VERSION, https_mode, bind_host, port)
     try:
         # 过滤 Windows 下客户端断开的 ConnectionResetError 回调噪声（旧 uvicorn.run 方案无效）
-        config = uvicorn.Config(app, host=host, port=port,
-                                log_level=uv_log_level,
-                                # ERR_TOO_MANY_RETRIES（首屏仅文字无样式的根因类别）；纯 Python 的
-                                http="h11",
-                                log_config=None, **ssl_kwargs)
+        # 审查报告 #3：proxy_headers=True 使 uvicorn 识别 X-Forwarded-For，反代后 request.client.host 为真实 IP
+        # 审查修复：接线 security.trusted_proxies → uvicorn forwarded_allow_ips。
+        # 此前该配置从未被消费（死配置）：uvicorn 默认只信任 127.0.0.1 的 XFF，
+        # 反代不在本机时审计 IP 记成代理 IP，失败锁定/封禁会误伤共享代理的所有用户。
+        _trusted = ((_ucfg or {}).get("security", {}) or {}).get("trusted_proxies") or []
+        config_kwargs = dict(
+            host=host, port=port,
+            log_level=uv_log_level,
+            proxy_headers=True,
+            # ERR_TOO_MANY_RETRIES（首屏仅文字无样式的根因类别）；纯 Python 的
+            http="h11",
+            log_config=None,
+        )
+        if _trusted:
+            config_kwargs["forwarded_allow_ips"] = ",".join(str(x) for x in _trusted)
+        config = uvicorn.Config(app, **config_kwargs, **ssl_kwargs)
         asyncio.run(_serve_with_exception_filter(config))
     except OSError as exc:
         # 兜底：极少数情况下运行时端口被抢占，给出明确提示

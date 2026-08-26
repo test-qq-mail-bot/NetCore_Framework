@@ -352,6 +352,12 @@ def ensure_certificate() -> tuple:
             key_p = CERT_DIR / "custom-content.key"
             cert_p.write_text(cert_text, encoding="utf-8")
             key_p.write_text(key_text, encoding="utf-8")
+            # 审查修复：私钥落盘后收紧权限（此前完全未处理）
+            try:
+                if os.name == "posix":
+                    os.chmod(key_p, 0o600)
+            except OSError:
+                pass
             return str(cert_p), str(key_p), True
         except Exception as exc:  # noqa: BLE001
             logger.error("写入配置内证书/私钥文本失败，回退其他来源：%s", exc)

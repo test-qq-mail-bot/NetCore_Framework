@@ -221,6 +221,8 @@ const App = {
                 let v = parseInt(r.data && r.data.auto_logout_minutes, 10);
                 if (isNaN(v) || v < 0) v = 5;
                 this.autoLogoutMinutes = v;
+                // 缓存时区到全局变量供 fmtTime 使用（需求2：前端按 user_config.yaml timezone 显示）
+                window.NC_TIMEZONE = (r.data && r.data.timezone) || 'Asia/Shanghai';
             } catch (e) {}
         },
         registerActivity() {
@@ -324,7 +326,9 @@ const App = {
                 + (isOpen ? ' nc-open' : '')
                 + active;
             var html = '<div class="' + cls + '"'
-                + (hasChildren ? ' data-toggle="' + m.id + '"' : ' data-path="' + (m.path || '#') + '"')
+                // 审查修复：m.id / m.path 由插件菜单数据提供，拼入 HTML 属性前必须转义，
+                // 否则含引号的值可闭合属性注入事件处理器（XSS 纵深防御）
+                + (hasChildren ? ' data-toggle="' + this._esc(m.id) + '"' : ' data-path="' + this._esc(m.path || '#') + '"')
                 + '>';
             html += '<span class="nc-menu-icon">' + window.NC_iconSvg(m.icon) + '</span>';
             html += '<span class="nc-menu-label">' + this._esc(m.label) + '</span>';
@@ -357,8 +361,10 @@ const App = {
         // 启动后拉取插件前端清单，动态注入 <script>，实现插件网页留在插件文件夹
         async loadPluginFrontends(app) {
             try {
-                // 清单接口为公开接口（无需鉴权）；偶发的网络抖动/在途中断(ECONNABORTED)
-                // 通过一次重试吸收，避免在控制台刷出无害告警。
+                // 审查修复：清单接口实际挂了 get_current_user（需已登录会话），
+                // 原注释「公开接口」与实现不符，已更正。
+                // 偶发的网络抖动/在途中断(ECONNABORTED) 通过一次重试吸收，
+                // 避免在控制台刷出无害告警。
                 let r = null;
                 try {
                     r = await http.get('/api/plugins/frontend-manifest');
@@ -557,22 +563,21 @@ window.NC.fmtTime = function (v) {
     let s = String(v).replace('Z', '');
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[\sT](\d{2}):(\d{2}):(\d{2})/);
     if (!m) return s;
+    // 后端入库统一为 UTC，前端按 user_config.yaml 的 timezone 换算显示（需求2）
     const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
     if (isNaN(dt.getTime())) return s;
+    const tzName = window.NC_TIMEZONE || 'Asia/Shanghai';
     try {
-        const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        if (tzName) {
-            const parts = new Intl.DateTimeFormat('zh-CN', {
-                timeZone: tzName, year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-            }).formatToParts(dt);
-            const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
-            return get('year') + '-' + get('month') + '-' + get('day') + ' ' + get('hour') + ':' + get('minute') + ':' + get('second');
-        }
-    } catch (e) { /* fallthrough */ }
+        const parts = new Intl.DateTimeFormat('zh-CN', {
+            timeZone: tzName, year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        }).formatToParts(dt);
+        const get = (t) => (parts.find(p => p.type === t) || {}).value || '';
+        return get('year') + '-' + get('month') + '-' + get('day') + ' ' + get('hour') + ':' + get('minute') + ':' + get('second');
+    } catch (e) { /* 时区无效时回退 UTC 原样 */ }
     const p = n => (n < 10 ? '0' + n : '' + n);
-    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate()) + ' ' +
-           p(dt.getHours()) + ':' + p(dt.getMinutes()) + ':' + p(dt.getSeconds());
+    return dt.getUTCFullYear() + '-' + p(dt.getUTCMonth() + 1) + '-' + p(dt.getUTCDate()) + ' ' +
+           p(dt.getUTCHours()) + ':' + p(dt.getUTCMinutes()) + ':' + p(dt.getUTCSeconds());
 };
 
 const vm = app.mount('#app');
