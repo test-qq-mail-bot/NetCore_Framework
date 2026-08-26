@@ -60,7 +60,7 @@ jobs:
         run: python build.py --target win
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: netcore-framework-windows
           path: dist/netcore-framework.exe
@@ -89,7 +89,7 @@ jobs:
         run: python build.py --target linux
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: netcore-framework-linux
           path: dist/netcore-framework
@@ -108,7 +108,7 @@ jobs:
         run: echo "version=$(grep -oP 'SYSTEM_VERSION\s*=\s*"\K[^"]+' core/config_loader.py | head -n1)" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
