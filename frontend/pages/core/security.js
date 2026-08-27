@@ -72,7 +72,7 @@ template: `
                 const note = typeof e === 'string' ? '' : (e.note || '');
                 const exp = typeof e === 'string' ? '' : (e.expires_at || '');
                 const expired = !!exp && new Date(exp) < new Date();
-                return { type: 'whitelist', ip: ip, note: note, expires: exp || '永久', weekday: exp ? window.NC_weekdayCn(exp) : '', expired: expired, time_raw: exp || '', status_key: expired ? 'expired' : 'valid' };
+                return { type: 'whitelist', ip: ip, note: note, expires: exp || '永久', weekday: exp ? window.NC_weekdayCn(exp) : '', expired: expired, time_raw: exp || '', block_until_cn: this.fmtBlockUntil(exp), status_key: expired ? 'expired' : 'valid' };
             });
             const b = (this.blacklist || []).map(e => {
                 const until = e.block_until || e.expires_at || '';
@@ -90,18 +90,19 @@ template: `
     methods: {
         _toUTCExpires(dateStr) {
             if (!dateStr) return '';
-            var tz = (window.NC && window.NC.timezone) || 'Asia/Shanghai';
+            var tz = (window.NC_TIMEZONE) || 'Asia/Shanghai';
             try {
                 var parts = String(dateStr).split('-');
                 var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10) - 1, d = parseInt(parts[2], 10);
                 var utcMs = Date.UTC(y, m, d, 0, 0, 0);
-                var Jan = new Date(Date.UTC(y, 0, 1)).toLocaleString('en-US', { timeZone: tz });
-                var Jul = new Date(Date.UTC(y, 6, 1)).toLocaleString('en-US', { timeZone: tz });
-                var JanOff = new Date(Date.UTC(y, 0, 1)).getTime() - new Date(Jan).getTime();
-                var JulOff = new Date(Date.UTC(y, 6, 1)).getTime() - new Date(Jul).getTime();
-                var offsetMs = -Math.max(JanOff, JulOff);
-                var dUtc = new Date(utcMs + offsetMs);
-                return dUtc.toISOString().replace('.000', '');
+                var offsetMs = new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'shortOffset' })
+                    .formatToParts(new Date(utcMs))
+                    .find(function(p) { return p.type === 'timeZoneName'; }).value;
+                var offMatch = offsetMs.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+                if (!offMatch) return dateStr;
+                var sign = offMatch[1] === '+' ? 1 : -1;
+                var offMin = sign * (parseInt(offMatch[2], 10) * 60 + parseInt(offMatch[3] || '0', 10));
+                return new Date(utcMs - offMin * 60000).toISOString().replace('.000', '');
             } catch (e) { return dateStr; }
         },
         fmtBlockUntil(iso) {

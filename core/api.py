@@ -608,6 +608,7 @@ async def basic_settings_put(req: BasicSettingsRequest, _: str = Depends(get_cur
             ("软件版本", _old_sys.get("version", ""), req.version),
             ("自动退出时间", _old_sys.get("auto_logout_minutes", 5), alm),
             ("时区", _old_sys.get("timezone", "Asia/Shanghai"), tz),
+            ("默认翻页条数", _old_sys.get("default_page_size", 10), dps),
             ("TOTP", _old_auth.get("totp_enabled", False), bool(req.totp_enabled)),
             ("HTTPS证书SAN地址", _old_https.get("domain", ""), req.domain),
         ]
@@ -722,6 +723,7 @@ async def system_session_reset(request: Request, _: str = Depends(get_current_us
     token = _extract_bearer(request)
     if token:
         get_session_manager().reset(token)
+    audit_log("session_reset", "会话已重置", "success")
     return {"success": True}
 
 
@@ -795,12 +797,14 @@ async def plugins_reload(req: dict, _: str = Depends(get_current_user)):
 
 @router_plugins.post("/system/plugins/reload-all")
 async def plugins_reload_all(_: str = Depends(get_current_user)):
+    audit_log("plugin_reload_all", "全量重载插件", "success")
     return {"results": await asyncio.to_thread(get_plugin_manager().reload_all)}
 
 
 @router_plugins.post("/system/plugins/reload-failed")
 async def plugins_reload_failed(_: str = Depends(get_current_user)):
     # 审查修复：与 reload/reload-all 保持一致转线程池（含模块导入与 on_load，阻塞 loop）
+    audit_log("plugin_reload_failed", "重载失败插件", "success")
     return {"results": await asyncio.to_thread(get_plugin_manager().reload_failed)}
 
 

@@ -793,7 +793,7 @@ def _render_user_config_commented(cfg: dict) -> str:
     L.append("  auto_logout_minutes: " + str(auto_logout) + "  # 自动退出时间（分钟）：无操作超过该时长自动退出；0=关闭")
     L.append("  timezone: " + timezone + "  # 时区（IANA 名，如 Asia/Shanghai）；「登录自动更新时区」开启时登录后按浏览器时区覆盖")
     L.append("  auto_update_timezone: " + auto_update_timezone + "  # 登录自动更新时区：true=每次登录用浏览器时区自动覆盖上面的 timezone；false=固定用上面的 timezone")
-    L.append("  default_page_size: " + str(default_page_size) + "  # 表单默认翻页数据：表格每页显示条数（5/10/20/50 或自定义）")
+    L.append("  default_page_size: " + str(default_page_size) + "  # 表单默认翻页数据：表格每页显示条数（1~100）")
     L.append("")
     L.append("# ---------- 认证相关 ----------")
     L.append("# 【如何修改登录密码】")
