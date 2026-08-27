@@ -14,7 +14,8 @@ template: `
             <el-button type="primary" @click="reloadAll">热重启全部</el-button>
             <el-button @click="reloadFailed">重启失败插件</el-button>
           </div>
-          <nc-table :data="plugins" :columns="cols" @selection-change="()=>{}">
+          <nc-table :data="plugins" :columns="cols" client-paged :page-size="pageSize" :page-sizes="[5,10,20,50]"
+                    @page-change="(p)=>{page=p;}" @size-change="(s)=>{pageSize=s;page=1;}">
             <template #col-status="{row}"><el-tag :type="row.status==='success'?'success':(row.status==='failed'?'danger':'info')">{{row.status}}</el-tag></template>
             <template #col-enabled="{row}"><el-switch v-model="row.enabled" @change="(val) => toggle(row.name, val)"></el-switch></template>
             <template #col-ops="{row}"><el-button size="small" type="warning" @click="reload(row.name)">热重启</el-button></template>
@@ -22,7 +23,7 @@ template: `
         </div>
       </div>
     </div>`,
-    data() { return { plugins: [], loadError: '', saving: '' }; },
+    data() { return { plugins: [], loadError: '', saving: '', page: 1, pageSize: (window.NC && window.NC.defaultPageSize) || 10 }; },
     computed: {
         cols() {
             return [

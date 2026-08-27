@@ -64,7 +64,7 @@ template: `
                 { label: '类型', prop: 'type', width: 110, sortable: true, filterable: true, valueMap: { whitelist: '白名单', blacklist: '黑名单' }, slotName: 'col-type' },
                 { label: 'IP', prop: 'ip', width: 180, sortable: true, filterable: true },
                 { label: '说明', prop: 'note' },
-                { label: '封禁/解封时间', prop: 'time_raw', width: 210, sortable: true, filterable: true, valueFormatter: this.fmtTimeRaw, slotName: 'col-time' },
+                { label: '有效期', prop: 'time_raw', width: 210, sortable: true, filterable: true, valueFormatter: this.fmtTimeRaw, slotName: 'col-time' },
                 { label: '状态', prop: 'status_key', width: 110, sortable: true, filterable: true, valueMap: { active: '封禁中', expired: '已过期', permanent: '永久封禁', valid: '有效' }, slotName: 'col-status' },
                 { label: '操作', width: 100, slotName: 'col-ops' },
             ];
@@ -99,6 +99,22 @@ template: `
         },
     },
     methods: {
+        _toUTCExpires(dateStr) {
+            if (!dateStr) return '';
+            var tz = (window.NC && window.NC.timezone) || 'Asia/Shanghai';
+            try {
+                var parts = String(dateStr).split('-');
+                var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10) - 1, d = parseInt(parts[2], 10);
+                var utcMs = Date.UTC(y, m, d, 0, 0, 0);
+                var Jan = new Date(Date.UTC(y, 0, 1)).toLocaleString('en-US', { timeZone: tz });
+                var Jul = new Date(Date.UTC(y, 6, 1)).toLocaleString('en-US', { timeZone: tz });
+                var JanOff = new Date(Date.UTC(y, 0, 1)).getTime() - new Date(Jan).getTime();
+                var JulOff = new Date(Date.UTC(y, 6, 1)).getTime() - new Date(Jul).getTime();
+                var offsetMs = Math.max(JanOff, JulOff);
+                var dUtc = new Date(utcMs - offsetMs);
+                return dUtc.toISOString().replace('.000', '');
+            } catch (e) { return dateStr; }
+        },
         fmtBlockUntil(iso) {
             // 空=永久：本列以**空白**呈现（口径见模板注释），不产出「永久」等文案；
             // 非空走 NC.fmtTime 按配置时区换算、去 T/Z/毫秒
@@ -128,8 +144,8 @@ template: `
             if (!this.ipInput) { this.$message.warning('请输入 IP'); return; }
             const minutes = this.blMin ? Number(this.blMin) : 0;  // 留空即 0 = 永久封禁
             try {
-                if (this.ipType === 'whitelist') await http.post('/api/security/whitelist', { ip: this.ipInput, note: this.ipNote, expires_at: this.ipExpires });
-                else await http.post('/api/security/blacklist', { ip: this.ipInput, minutes: minutes, note: this.ipNote, expires_at: this.ipExpires });
+                if (this.ipType === 'whitelist') await http.post('/api/security/whitelist', { ip: this.ipInput, note: this.ipNote, expires_at: this._toUTCExpires(this.ipExpires) });
+                else await http.post('/api/security/blacklist', { ip: this.ipInput, minutes: minutes, note: this.ipNote, expires_at: this._toUTCExpires(this.ipExpires) });
                 this.$message.success('已添加');
                 this.ipInput = ''; this.blMin = null; this.ipNote = ''; this.ipExpires = '';
                 this.load();

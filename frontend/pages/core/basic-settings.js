@@ -32,11 +32,8 @@ window.NC.registerPage('core_basic', {
               <div class="nc-form-hint">勾选后，每次管理员登录自动把时区更新为<b>浏览器所在时区</b></div>
             </el-form-item>
             <el-form-item label="表单默认翻页数据">
-              <div style="display:flex;gap:8px;align-items:center;">
-                <el-input-number v-model="form.default_page_size" :min="1" :max="100" controls-position="right" style="width:120px;"></el-input-number>
-                <el-button v-for="s in [5,10,20,50]" :key="s" size="small" @click="form.default_page_size=s">{{s}}</el-button>
-              </div>
-              <div class="nc-form-hint">表格组件每页默认显示条数，可在输入框内填入 1~100 的任意数字</div>
+              <el-input v-model="form.default_page_size" placeholder="10" style="width:160px;"></el-input>
+              <div class="nc-form-hint">表格组件每页默认显示条数，可填入 1~100 的任意数字</div>
             </el-form-item>
           </el-form>
         </div>
@@ -212,6 +209,8 @@ window.NC.registerPage('core_basic', {
                 this.$message.success('基础设置已保存并生效（HTTPS 开关需重启服务后生效）');
                 // 同步刷新菜单栏的软件名称 / 版本号
                 if (this.$root && this.$root.fetchCoreConfig) this.$root.fetchCoreConfig();
+                // 刷新全局默认翻页大小
+                if (this.$root && this.$root.loadDefaultPageSize) this.$root.loadDefaultPageSize();
                 // 广播设置变更，让根组件重新读取自动退出阈值
                 window.dispatchEvent(new Event('nc-settings-changed'));
             } catch (e) {
