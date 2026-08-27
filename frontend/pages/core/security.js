@@ -47,10 +47,7 @@ template: `
                 <span>{{ row.time_raw ? row.block_until_cn : '永久' }}</span>
             </template>
             <template #col-status="{row}">
-                <el-tag v-if="row.type==='blacklist'" :type="row.ban_state==='active'?'danger':(row.ban_state==='expired'?'info':'warning')">
-                  {{row.ban_state==='active'?'封禁中':(row.ban_state==='expired'?'已过期':'永久封禁')}}
-                </el-tag>
-                <el-tag v-else :type="row.expired?'info':'success'">{{row.expired?'已过期':'有效'}}</el-tag>
+                <el-tag :type="row.expired?'info':'success'">{{row.expired?'已过期':'有效'}}</el-tag>
             </template>
             <template #col-ops="{row}"><el-button size="small" type="danger" @click="delIp(row)">移除</el-button></template>
           </nc-table>
@@ -65,7 +62,7 @@ template: `
                 { label: 'IP', prop: 'ip', width: 180, sortable: true, filterable: true },
                 { label: '说明', prop: 'note' },
                 { label: '有效期', prop: 'time_raw', width: 210, sortable: true, filterable: true, valueFormatter: this.fmtTimeRaw, slotName: 'col-time' },
-                { label: '状态', prop: 'status_key', width: 110, sortable: true, filterable: true, valueMap: { active: '封禁中', expired: '已过期', permanent: '永久封禁', valid: '有效' }, slotName: 'col-status' },
+                { label: '状态', prop: 'status_key', width: 110, sortable: true, filterable: true, slotName: 'col-status' },
                 { label: '操作', width: 100, slotName: 'col-ops' },
             ];
         },
@@ -80,19 +77,11 @@ template: `
             const b = (this.blacklist || []).map(e => {
                 const until = e.block_until || e.expires_at || '';
                 const expired = !!until && new Date(until) < new Date();
-                const ban_state = until ? (expired ? 'expired' : 'active') : 'permanent';
-                let remain = '';
-                if (until && !expired) {
-                    const diff = new Date(until) - new Date();
-                    const mins = Math.floor(diff / 60000);
-                    remain = mins >= 60 ? (Math.floor(mins / 60) + '小时' + (mins % 60) + '分') : (mins + '分钟');
-                }
                 return {
                     type: 'blacklist', ip: e.ip, note: e.note || '',
                     block_until: until, block_until_cn: this.fmtBlockUntil(until),
-                    ban_state: ban_state, remain: remain,
                     expires: until || '永久', weekday: until ? window.NC_weekdayCn(until) : '', expired: expired,
-                    time_raw: until || '', status_key: ban_state,
+                    time_raw: until || '', status_key: expired ? 'expired' : 'valid',
                 };
             });
             return w.concat(b);
@@ -110,8 +99,8 @@ template: `
                 var Jul = new Date(Date.UTC(y, 6, 1)).toLocaleString('en-US', { timeZone: tz });
                 var JanOff = new Date(Date.UTC(y, 0, 1)).getTime() - new Date(Jan).getTime();
                 var JulOff = new Date(Date.UTC(y, 6, 1)).getTime() - new Date(Jul).getTime();
-                var offsetMs = Math.max(JanOff, JulOff);
-                var dUtc = new Date(utcMs - offsetMs);
+                var offsetMs = -Math.max(JanOff, JulOff);
+                var dUtc = new Date(utcMs + offsetMs);
                 return dUtc.toISOString().replace('.000', '');
             } catch (e) { return dateStr; }
         },

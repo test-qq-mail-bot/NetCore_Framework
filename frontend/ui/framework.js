@@ -541,7 +541,7 @@
           <div v-if="backend || clientPaged" class="nc-table-pager" style="margin-top:12px;display:flex;justify-content:flex-end;align-items:center;gap:12px;">
             <el-pagination background :layout="pageSizes.length ? 'total, sizes, prev, pager, next, jumper' : 'total, prev, pager, next'"
                            :total="totalCount" :page-size="innerPageSize" :page-sizes="pageSizes.length ? pageSizes : [5,10,20,50]"
-                           :current-page="backend ? page : innerPage" @current-change="onPage"
+                           :current-page="backend ? page : innerPage" pager-count="5" @current-change="onPage"
                            @size-change="s => { innerPageSize = s; $emit('size-change', s); }"></el-pagination>
             <slot name="pager-extra"></slot>
           </div>
