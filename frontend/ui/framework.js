@@ -447,7 +447,7 @@
             // 分页尺寸可切换（clientPaged 模式下生效）
             pageSizes: { type: Array, default: () => [] },
         },
-        emits: ['sort-change', 'filter-change', 'page-change', 'selection-change', 'size-change'],
+        emits: ['sort-change', 'filter-change', 'page-change', 'selection-change', 'size-change', 'row-click'],
         mixins: [NC.SF_MIXIN],
         data() { return { innerPage: this.page || 1, innerPageSize: this.pageSize || ((typeof window !== 'undefined' && window.NC && window.NC.defaultPageSize) || 10) }; },
         watch: { page(v) { this.innerPage = v || 1; }, pageSize(v) { if (v) this.innerPageSize = v; } },
@@ -519,7 +519,8 @@
         <div class="nc-table-wrap">
           <el-table ref="innerTable" :data="shown" :stripe="stripe" :border="border" :max-height="maxHeight || undefined"
                     :empty-text="emptyText" :loading="loading" :row-key="rowKey"
-                    @selection-change="e => $emit('selection-change', e)">
+                    @selection-change="e => $emit('selection-change', e)"
+                    @row-click="(row, column, event) => $emit('row-click', row, column, event)">
             <el-table-column v-if="selectable" type="selection" width="48" fixed="left"></el-table-column>
             <el-table-column v-for="col in thead" :key="col.prop || col.label"
                              :prop="col.prop" :label="col.label" :width="col.width" :min-width="col.minWidth"
