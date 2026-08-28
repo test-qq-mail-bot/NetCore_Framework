@@ -270,3 +270,8 @@ body.nc-resizing * { cursor: col-resize !important; user-select: none !important
 @media (prefers-color-scheme: dark) {
     :root { --nc-zebra: rgba(255,255,255,0.03); }
 }
+
+/* 全局表格单元格间距 */
+.el-table .el-table__cell {
+    padding: 8px 12px;
+}
