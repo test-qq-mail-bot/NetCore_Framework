@@ -84,7 +84,7 @@ SYSTEM_NAME = "NetCore Framework"
 # 不再依赖手工同步的全局版本号）
 # core.yaml 恢复中文注释（文本级迁移，logging/session/https/debug 迁 user_config
 # 且不留「迁移自」标注）、log-level 落盘、审计记录配置修改前后差异、EXE 版本资源、
-SYSTEM_VERSION = "20260828-V1"
+SYSTEM_VERSION = "20260828-V2"
 
 # 全局配置缓存
 _config_cache = {}
