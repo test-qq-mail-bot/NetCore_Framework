@@ -347,7 +347,7 @@ def _write_default_configs():
             "notify": {
                 "rate_limit": {
                     "enabled": True,
-                    "min_interval_seconds": 60,
+                    "max_per_second": 5,
                 }
             },
             # HTTPS 证书/私钥以 PEM 文本存储（cert_content/key_content），
@@ -492,10 +492,10 @@ def _ensure_user_config_defaults():
         }
         changed = True
     if not isinstance(cfg.get("notify"), dict):
-        cfg["notify"] = {"rate_limit": {"enabled": True, "min_interval_seconds": 60}}
+        cfg["notify"] = {"rate_limit": {"enabled": True, "max_per_second": 5}}
         changed = True
     elif not isinstance(cfg["notify"].get("rate_limit"), dict):
-        cfg["notify"]["rate_limit"] = {"enabled": True, "min_interval_seconds": 60}
+        cfg["notify"]["rate_limit"] = {"enabled": True, "max_per_second": 5}
         changed = True
     if "session" in cfg:
         cfg.pop("session", None)
@@ -758,7 +758,7 @@ def _render_user_config_commented(cfg: dict) -> str:
     log_retention = int(logging_cfg.get("audit_log_retention_days", 60) or 60)
     rate_limit = notify_cfg.get("rate_limit", {}) or {}
     notify_enabled = _yaml_scalar_str(bool(rate_limit.get("enabled", True)))
-    notify_interval = int(rate_limit.get("min_interval_seconds", 60) or 60)
+    notify_max_per_second = int(rate_limit.get("max_per_second", 5) or 5)
     https_enabled = _yaml_scalar_str(bool(https_cfg.get("enabled", True)))
     https_cert = _yaml_scalar_str(https_cfg.get("cert_content", ""))
     https_key = _yaml_scalar_str(https_cfg.get("key_content", ""))
@@ -846,7 +846,7 @@ def _render_user_config_commented(cfg: dict) -> str:
     L.append("notify:")
     L.append("  rate_limit:")
     L.append("    enabled: " + notify_enabled + "           # 是否启用通知发送频率限制")
-    L.append("    min_interval_seconds: " + str(notify_interval) + "  # 同一渠道最小发送间隔（秒）")
+    L.append("    max_per_second: " + str(notify_max_per_second) + "              # 每渠道每秒最大发送数（滑动窗口）")
     L.append("")
     L.append("# ---------- HTTPS 配置 ----------")
     L.append("# enabled=true 默认启用 HTTPS：未配置自定义证书时自动生成自签名证书（data/certs/），")

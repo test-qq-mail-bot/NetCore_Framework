@@ -19,6 +19,22 @@ template: `
           </nc-table>
         </div>
       </div>
+      <div class="nc-section">
+        <h2 class="nc-section-title">频率限制</h2>
+        <div class="nc-form-card">
+          <el-form :model="rateLimit" label-width="200px" style="max-width:480px;">
+            <el-form-item label="启用频率限制">
+              <el-switch v-model="rateLimit.enabled"></el-switch>
+            </el-form-item>
+            <el-form-item label="每渠道每秒最大发送数">
+              <el-input v-model.number="rateLimit.max_per_second" placeholder="默认5"></el-input>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveRateLimit">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
       <el-dialog title="编辑渠道" v-model="show" width="520px">
         <el-form :model="form" label-width="140px">
           <el-form-item label="启用"><el-switch v-model="form.enabled"></el-switch></el-form-item>
@@ -37,7 +53,7 @@ template: `
         <template #footer><el-button @click="show=false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
       </el-dialog>
     </div>`,
-    data() { return { channels: [], show: false, form: {}, currentId: '', loadError: '' }; },
+    data() { return { channels: [], show: false, form: {}, currentId: '', loadError: '', rateLimit: { enabled: true, max_per_second: 5 } }; },
     computed: {
         cols() {
             return [
@@ -51,6 +67,14 @@ template: `
         async load() {
             try { const r = await http.get('/api/notify/channels'); this.channels = r.data.channels; this.loadError = ''; }
             catch (e) { this.loadError = (e && e.message) || '无法连接到服务器'; }
+            try {
+                const cfg = await http.get('/api/notify/config');
+                const rl = (cfg.data && cfg.data.rate_limit) || {};
+                this.rateLimit = {
+                    enabled: rl.enabled !== false,
+                    max_per_second: rl.max_per_second || 5,
+                };
+            } catch (e) {}
         },
         async test(id) {
             const res = await http.post('/api/notify/test/' + id, {});
@@ -68,6 +92,16 @@ template: `
             const data = all.data; data[this.currentId] = this.form;
             await http.put('/api/notify/config', data);
             this.show = false; this.$message.success('已保存'); this.load();
+        },
+        async saveRateLimit() {
+            const all = await http.get('/api/notify/config');
+            const data = all.data;
+            data.rate_limit = {
+                enabled: this.rateLimit.enabled,
+                max_per_second: parseInt(this.rateLimit.max_per_second) || 5,
+            };
+            await http.put('/api/notify/config', data);
+            this.$message.success('已保存');
         }
     },
     mounted() { this.load(); }

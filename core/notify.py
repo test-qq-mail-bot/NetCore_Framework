@@ -65,15 +65,15 @@ class NotifyManager:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._last_send = {}
+        self._send_history = {}  # {channel: [timestamp, ...]} 滑动窗口
         self.reload()
 
     def reload(self):
-        """重新加载通知配置与加密密钥（审查报告 #21：复用实例锁，仅清 _last_send）"""
+        """重新加载通知配置与加密密钥（审查报告 #21：复用实例锁，仅清 _send_history）"""
         self.config = get_notify_config()
         self.key = get_encryption_key()
         with self._lock:
-            self._last_send.clear()
+            self._send_history.clear()
 
     # ---------------- 加解密辅助 ----------------
     def _decrypt(self, value):
@@ -119,21 +119,28 @@ class NotifyManager:
         tpl = templates.get(template_id) or templates.get("default", "")
         return GoTemplate(tpl).render(ctx)
 
-    # ---------------- 频率限制 ----------------
+    # ---------------- 频率限制（滑动窗口，每渠道独立） ----------------
     def _rate_limited(self, channel):
         rate = _get_rate_limit_config()
         if not rate.get("enabled", True):
             return False
-        min_interval = int(rate.get("min_interval_seconds", 60))
+        max_ps = int(rate.get("max_per_second", 5) or 5)
+        now = datetime.now(timezone.utc).timestamp()
         with self._lock:
-            last = self._last_send.get(channel)
-            if last and (datetime.now(timezone.utc).timestamp() - last) < min_interval:
+            history = self._send_history.get(channel, [])
+            # 清理1秒前的记录
+            history = [t for t in history if now - t < 1.0]
+            self._send_history[channel] = history
+            if len(history) >= max_ps:
                 return True
         return False
 
     def _mark_sent(self, channel):
         with self._lock:
-            self._last_send[channel] = datetime.now(timezone.utc).timestamp()
+            now = datetime.now(timezone.utc).timestamp()
+            history = self._send_history.get(channel, [])
+            history.append(now)
+            self._send_history[channel] = history
 
     # ---------------- 发送 ----------------
     def send(self, channels, title, content, priority="normal", recipients=None,
@@ -149,8 +156,8 @@ class NotifyManager:
                 results.append({"channel": channel, "success": False, "message": "渠道未启用"})
                 continue
             if self._rate_limited(channel):
-                msg = "频率限制，请 %d 秒后再试" % int(
-                    _get_rate_limit_config().get("min_interval_seconds", 60)
+                msg = "频率限制，每秒最多 %d 条" % int(
+                    _get_rate_limit_config().get("max_per_second", 5)
                 )
                 audit_log("notify_send", "渠道:%s 频率限制" % channel, "failed", username="system")
                 results.append({"channel": channel, "success": False, "message": msg})
